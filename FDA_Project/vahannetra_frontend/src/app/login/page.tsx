@@ -77,9 +77,8 @@ export default function LoginPage() {
     try {
       setForgotLoading(true);
       setForgotMessage("");
-      const auth = await verifyPasswordOtp(forgotEmail, forgotOtp);
-      setSessionFromAuth(auth);
-      router.push("/dashboard");
+      await verifyPasswordOtp(forgotEmail, forgotOtp);
+      setForgotMessage("OTP verified. You can now continue standard login.");
     } catch (forgotError) {
       setForgotMessage(forgotError instanceof Error ? forgotError.message : "OTP verification failed");
     } finally {
@@ -128,7 +127,7 @@ export default function LoginPage() {
         </div>
 
         {forgotOpen ? (
-          <Card className="space-y-3 border-amber-300/20">
+          <Card className="space-y-3 border-amber-300/20 p-4">
             <p className="text-sm font-semibold text-slate-100">Password recovery (OTP)</p>
             <div>
               <Label htmlFor="forgot-email">Work Email</Label>
@@ -144,6 +143,10 @@ export default function LoginPage() {
               <Label htmlFor="forgot-otp">OTP</Label>
               <Input
                 id="forgot-otp"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                autoComplete="one-time-code"
                 placeholder="123456"
                 value={forgotOtp}
                 onChange={(event) => setForgotOtp(event.target.value)}
@@ -163,7 +166,7 @@ export default function LoginPage() {
                 onClick={() => void verifyForgotOtp()}
                 disabled={!forgotEmail || !forgotOtp || forgotLoading}
               >
-                Verify & Sign in
+                Verify OTP
               </Button>
             </div>
             {forgotMessage ? <p className="text-xs text-slate-300">{forgotMessage}</p> : null}
