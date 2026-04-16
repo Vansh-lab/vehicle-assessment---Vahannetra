@@ -72,6 +72,8 @@ export function PhotoUpload({ file, onFileChange }: PhotoUploadProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
+  const isSupportedImageFile = (candidate: File): boolean => candidate.type.startsWith("image/");
+
   const validateImage = async (pickedFile: File) => {
     const nextWarnings: string[] = [];
 
@@ -98,7 +100,13 @@ export function PhotoUpload({ file, onFileChange }: PhotoUploadProps) {
   };
 
   const handleFile = async (pickedFile: File | null) => {
-    if (!pickedFile) return;
+    if (!pickedFile || !isSupportedImageFile(pickedFile)) {
+      onFileChange(null);
+      setPreviewUrl(null);
+      setWarnings(["Unsupported file type. Please upload a valid image file."]);
+      return;
+    }
+
     onFileChange(pickedFile);
     setPreviewUrl(URL.createObjectURL(pickedFile));
     await validateImage(pickedFile);
