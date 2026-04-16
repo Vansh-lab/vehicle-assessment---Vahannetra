@@ -116,26 +116,29 @@ src/
 - `ErrorState({ message, onRetry })`
 
 ## Backend Integration Status
-### Already available in backend
-- ✅ `POST /assess-damage/` (used in processing flow)
-- ✅ `GET /view-result/{filename}` (processed image access)
+### Implemented backend modules
+- ✅ `POST /assess-damage/`
+- ✅ `GET /view-result/{filename}`
+- ✅ `POST /auth/login`
+- ✅ `POST /auth/forgot-password`
+- ✅ `POST /auth/verify-otp`
+- ✅ `GET /dashboard/overview`
+- ✅ `GET /inspections`
+- ✅ `GET /inspections/{id}`
+- ✅ `GET /inspections/{id}/report.pdf`
+- ✅ `GET /analytics/damage-distribution`
+- ✅ `GET /analytics/severity-trends`
+- ✅ `GET /analytics/vehicle-risk-ranking`
+- ✅ `GET /settings`
+- ✅ `PATCH /settings`
 
-### Missing backend modules (you can build)
-- ❌ Auth endpoints
-  - Build: `/auth/login`, `/auth/forgot-password`, `/auth/verify-otp`
-  - Return JWT + refresh token + org-scoped user profile
-- ❌ Dashboard overview
-  - Build: `/dashboard/overview`
-  - Return fleet score, recent inspections, attention list
-- ❌ History + report endpoints
-  - Build: `/inspections` (filters: vehicle/date/severity/status)
-  - Build: `/inspections/{id}` + `/inspections/{id}/report.pdf`
-- ❌ Analytics
-  - Build: `/analytics/damage-distribution`
-  - Build: `/analytics/severity-trends`
-  - Build: `/analytics/vehicle-risk-ranking`
-- ❌ Settings/Profile
-  - Build: `/settings` GET/PATCH for org + notifications + theme
+### Still missing for full production backend
+- ❌ Real JWT signing/verification middleware (current auth tokens are demo tokens)
+- ❌ Database persistence (current data is in-memory mock dataset)
+- ❌ Real forgot-password OTP provider integration (email/SMS gateway)
+- ❌ Role-based authorization and org-level access control checks
+- ❌ Production-grade PDF templating and signed report metadata
+- ❌ Backend automated tests and CI CodeQL workflow stability
 
 ## Mock Responses
 - Sample AI result JSON: `src/lib/api/mock-responses/ai-results.json`

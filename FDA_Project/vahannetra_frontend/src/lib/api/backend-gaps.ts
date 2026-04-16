@@ -13,32 +13,27 @@ export const backendCapabilities: BackendCapability[] = [
   },
   {
     key: "Authentication",
-    status: "missing",
-    howToBuild:
-      "Create /auth/login, /auth/forgot-password, /auth/verify-otp with JWT + refresh token, and return user + org scope.",
+    status: "implemented",
+    endpoint: "POST /auth/login, POST /auth/forgot-password, POST /auth/verify-otp",
   },
   {
     key: "Fleet dashboard",
-    status: "missing",
-    howToBuild:
-      "Create /dashboard/overview endpoint returning fleet health score, recent inspections and attention vehicles.",
+    status: "implemented",
+    endpoint: "GET /dashboard/overview",
   },
   {
     key: "Inspection history and report PDF",
-    status: "missing",
-    howToBuild:
-      "Create /inspections with search filters and /inspections/{id}/report.pdf endpoint.",
+    status: "implemented",
+    endpoint: "GET /inspections, GET /inspections/{id}, GET /inspections/{id}/report.pdf",
   },
   {
     key: "Analytics",
-    status: "missing",
-    howToBuild:
-      "Create /analytics/damage-distribution, /analytics/severity-trends, /analytics/vehicle-risk-ranking endpoints.",
+    status: "implemented",
+    endpoint: "GET /analytics/damage-distribution, /analytics/severity-trends, /analytics/vehicle-risk-ranking",
   },
   {
     key: "Profile/settings",
-    status: "missing",
-    howToBuild:
-      "Create /settings GET/PATCH for organization profile, notifications, and theme preference.",
+    status: "implemented",
+    endpoint: "GET /settings, PATCH /settings",
   },
 ];

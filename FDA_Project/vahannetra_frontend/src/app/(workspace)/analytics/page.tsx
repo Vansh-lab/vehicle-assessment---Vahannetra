@@ -1,11 +1,13 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, PieChart, Pie, Cell } from "recharts";
 import { getAnalytics } from "@/lib/api/services";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/states/error-state";
+
+const pieColors = ["#00e5ff", "#35d48d", "#ffb648", "#ff5a7a", "#9f7aea"];
 
 export default function AnalyticsPage() {
   const { data, isLoading, isError, refetch } = useQuery({ queryKey: ["analytics"], queryFn: getAnalytics });
@@ -30,6 +32,23 @@ export default function AnalyticsPage() {
           </ResponsiveContainer>
         </div>
       </Card>
+
+      <Card>
+        <p className="text-lg font-semibold text-slate-100">Damage Distribution</p>
+        <div className="mt-4 h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={data.distribution} dataKey="count" nameKey="category" outerRadius={95} label>
+                {data.distribution.map((entry, index) => (
+                  <Cell key={entry.category} fill={pieColors[index % pieColors.length]} />
+                ))}
+              </Pie>
+              <Tooltip />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+
       <Card>
         <p className="text-lg font-semibold text-slate-100">Vehicle-wise Risk Ranking</p>
         <div className="mt-4 h-64">

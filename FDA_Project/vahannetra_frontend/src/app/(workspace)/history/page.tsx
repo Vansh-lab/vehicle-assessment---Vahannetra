@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import Link from "next/link";
-import { getHistory } from "@/lib/api/services";
+import { getHistory, getInspectionReportUrl } from "@/lib/api/services";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -16,16 +16,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function HistoryPage() {
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
-  const { data, isLoading, isError, refetch } = useQuery({ queryKey: ["history"], queryFn: getHistory });
+  const [dateFilter, setDateFilter] = useState("");
 
-  const filtered = useMemo(() => {
-    if (!data) return [];
-    return data.filter((item) => {
-      const matchSearch = `${item.plate} ${item.model}`.toLowerCase().includes(search.toLowerCase());
-      const matchSeverity = severityFilter === "all" || item.severity === severityFilter;
-      return matchSearch && matchSeverity;
-    });
-  }, [data, search, severityFilter]);
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ["history", search, severityFilter, dateFilter],
+    queryFn: () => getHistory({ search, severity: severityFilter, date: dateFilter }),
+  });
+
+  const filtered = useMemo(() => data ?? [], [data]);
 
   return (
     <div className="space-y-4">
@@ -33,34 +31,51 @@ export default function HistoryPage() {
         <p className="text-lg font-semibold text-slate-100">Inspection History</p>
         <div className="grid gap-2 sm:grid-cols-3">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search vehicle / plate" />
-          <select aria-label="severity-filter" className="h-11 rounded-xl border border-white/15 bg-slate-950/70 px-3 text-sm text-slate-100" value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value)}>
+          <select
+            aria-label="severity-filter"
+            className="h-11 rounded-xl border border-white/15 bg-slate-950/70 px-3 text-sm text-slate-100"
+            value={severityFilter}
+            onChange={(event) => setSeverityFilter(event.target.value)}
+          >
             <option value="all">All severities</option>
             <option value="low">Low</option>
             <option value="medium">Medium</option>
             <option value="high">High</option>
           </select>
-          <Input type="date" aria-label="date-filter" />
+          <Input type="date" aria-label="date-filter" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} />
         </div>
       </Card>
 
       {isLoading ? <Skeleton className="h-40" /> : null}
       {isError ? <ErrorState message="Failed to load history." onRetry={() => refetch()} /> : null}
-      {!isLoading && !isError && filtered.length === 0 ? <EmptyState title="No inspections found" description="Try adjusting date or severity filters." /> : null}
+      {!isLoading && !isError && filtered.length === 0 ? (
+        <EmptyState title="No inspections found" description="Try adjusting date or severity filters." />
+      ) : null}
 
       <div className="space-y-3">
         {filtered.map((item) => (
-          <Link key={item.id} href={`/history/${item.id}`}><Card>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-sm font-semibold text-slate-100">{item.plate} • {item.model}</p>
-                <p className="text-xs text-slate-400">{new Date(item.date).toLocaleString()} • Status: {item.status}</p>
+          <Link key={item.id} href={`/history/${item.id}`}>
+            <Card>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-100">
+                    {item.plate} • {item.model}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {new Date(item.date).toLocaleString()} • Status: {item.status}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge className="capitalize">{item.severity}</Badge>
+                  <a href={getInspectionReportUrl(item.id)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+                    <Button size="sm" variant="secondary">
+                      <Download size={14} className="mr-1" /> PDF
+                    </Button>
+                  </a>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Badge className="capitalize">{item.severity}</Badge>
-                <Button size="sm" variant="secondary"><Download size={14} className="mr-1" /> PDF</Button>
-              </div>
-            </div>
-          </Card></Link>
+            </Card>
+          </Link>
         ))}
       </div>
     </div>

@@ -49,4 +49,41 @@ export interface BackendCapability {
   howToBuild?: string;
 }
 
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+}
+
+export interface AuthOrganization {
+  id: string;
+  name: string;
+  region: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+  issued_at: string;
+  user: AuthUser;
+  organization: AuthOrganization;
+}
+
+export interface SettingsResponse {
+  organization: {
+    name: string;
+    region: string;
+    active_inspectors: number;
+  };
+  notifications: {
+    push: boolean;
+    email: boolean;
+    critical_only: boolean;
+  };
+  theme: "dark" | "light";
+}
+
 export type ResultResponse = InspectionResult;
