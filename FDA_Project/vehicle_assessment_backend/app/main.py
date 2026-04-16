@@ -531,7 +531,12 @@ async def assess_damage(
 async def get_result_image(filename: str, current_user: User = Depends(get_current_user)):
     _ = current_user
     base_dir = UPLOAD_DIR.resolve()
-    file_path = (base_dir / filename).resolve()
+
+    requested_name = Path(filename)
+    if requested_name.name != filename or filename in {"", ".", ".."}:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    file_path = (base_dir / requested_name.name).resolve()
 
     try:
         file_path.relative_to(base_dir)
