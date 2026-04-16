@@ -1,8 +1,9 @@
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, init_seed_data
 
 
+init_seed_data()
 client = TestClient(app)
 
 

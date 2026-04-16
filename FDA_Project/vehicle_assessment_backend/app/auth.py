@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.db_models import RefreshToken, User
 
-JWT_SECRET = os.getenv("VAHANNETRA_JWT_SECRET", "change-me-in-production")
+JWT_SECRET = os.getenv("VAHANNETRA_JWT_SECRET", "change-me-in-production-very-long-secret-key-32chars")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = int(os.getenv("VAHANNETRA_ACCESS_TOKEN_MINUTES", "30"))
 REFRESH_TOKEN_DAYS = int(os.getenv("VAHANNETRA_REFRESH_TOKEN_DAYS", "14"))

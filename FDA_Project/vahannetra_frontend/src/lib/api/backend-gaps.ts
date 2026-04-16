@@ -36,4 +36,9 @@ export const backendCapabilities: BackendCapability[] = [
     status: "implemented",
     endpoint: "GET /settings, PATCH /settings",
   },
+  {
+    key: "Claims integration",
+    status: "implemented",
+    endpoint: "POST /claims/submit",
+  },
 ];

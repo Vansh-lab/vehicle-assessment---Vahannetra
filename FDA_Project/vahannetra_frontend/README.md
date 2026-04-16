@@ -122,6 +122,8 @@ src/
 - ✅ `POST /auth/login`
 - ✅ `POST /auth/forgot-password`
 - ✅ `POST /auth/verify-otp`
+- ✅ `POST /auth/refresh`
+- ✅ `POST /auth/logout`
 - ✅ `GET /dashboard/overview`
 - ✅ `GET /inspections`
 - ✅ `GET /inspections/{id}`
@@ -131,23 +133,22 @@ src/
 - ✅ `GET /analytics/vehicle-risk-ranking`
 - ✅ `GET /settings`
 - ✅ `PATCH /settings`
+- ✅ `POST /claims/submit`
 
 ### Still missing for full production backend
-- ❌ Real JWT signing/verification middleware (current auth tokens are demo tokens)
-- ❌ Database persistence (current data is in-memory mock dataset)
-- ❌ Real forgot-password OTP provider integration (email/SMS gateway)
-- ❌ Role-based authorization and org-level access control checks
-- ❌ Production-grade PDF templating and signed report metadata
-- ❌ Backend automated tests and CI CodeQL workflow stability
+- ❌ External managed OTP provider (Twilio/SendGrid/etc.) with delivery callbacks and retry telemetry
+- ❌ Multi-tenant hardening beyond org claim checks (e.g., row-level policy at DB layer)
+- ❌ Full timezone-aware datetime migration (`datetime.utcnow` deprecation cleanup)
+- ❌ Secret management via vault/KMS (currently env-based secret)
 
 ## Mock Responses
 - Sample AI result JSON: `src/lib/api/mock-responses/ai-results.json`
 
 ## Production Polish Checklist
-- [ ] Replace mock services with real endpoints
-- [ ] Add auth token handling + refresh flow
-- [ ] Add robust image quality checks (blur/brightness using CV pipeline)
-- [ ] Add report PDF generation integration
+- [x] Replace mock services with real endpoints
+- [x] Add auth token handling + refresh flow
+- [x] Add robust image quality checks (blur/brightness using CV pipeline)
+- [x] Add report PDF generation integration
 - [ ] Add i18n + full accessibility audit (WCAG AA)
 - [ ] Add telemetry + error monitoring (Sentry)
 - [ ] Add E2E tests for inspection wizard and result report
