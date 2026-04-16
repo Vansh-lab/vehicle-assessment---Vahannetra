@@ -101,6 +101,44 @@ export async function loginWithBackend(payload: {
   );
 }
 
+export async function requestPasswordOtp(email: string): Promise<{ message: string; otp_required: boolean; channel: string }> {
+  if (!USE_BACKEND) {
+    await delay(350);
+    return {
+      message: "OTP sent to your work email.",
+      otp_required: true,
+      channel: "email",
+    };
+  }
+
+  return apiRequest<{ message: string; otp_required: boolean; channel: string }>(
+    "/auth/forgot-password",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    },
+    { auth: false },
+  );
+}
+
+export async function verifyPasswordOtp(email: string, otp: string): Promise<AuthResponse> {
+  if (!USE_BACKEND) {
+    await delay(350);
+    return loginWithBackend({ email, password: "mock-password", otp });
+  }
+
+  return apiRequest<AuthResponse>(
+    "/auth/verify-otp",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, otp }),
+    },
+    { auth: false },
+  );
+}
+
 export async function assessDamageWithBackend(
   file: File,
   payload: NewInspectionPayload,
@@ -212,6 +250,7 @@ export async function getRecentInspections(): Promise<HistoryItem[]> {
 export async function getHistory(filters?: {
   search?: string;
   severity?: string;
+  status?: string;
   date?: string;
 }): Promise<HistoryItem[]> {
   if (!USE_BACKEND) {
@@ -222,6 +261,7 @@ export async function getHistory(filters?: {
   const params = new URLSearchParams();
   if (filters?.search) params.set("search", filters.search);
   if (filters?.severity && filters.severity !== "all") params.set("severity", filters.severity);
+  if (filters?.status && filters.status !== "all") params.set("status", filters.status);
   if (filters?.date) params.set("date", filters.date);
 
   const query = params.toString();

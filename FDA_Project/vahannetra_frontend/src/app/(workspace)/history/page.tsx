@@ -16,11 +16,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function HistoryPage() {
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateFilter, setDateFilter] = useState("");
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["history", search, severityFilter, dateFilter],
-    queryFn: () => getHistory({ search, severity: severityFilter, date: dateFilter }),
+    queryKey: ["history", search, severityFilter, statusFilter, dateFilter],
+    queryFn: () => getHistory({ search, severity: severityFilter, status: statusFilter, date: dateFilter }),
   });
 
   const filtered = useMemo(() => data ?? [], [data]);
@@ -36,7 +37,7 @@ export default function HistoryPage() {
     <div className="space-y-4">
       <Card className="space-y-3">
         <p className="text-lg font-semibold text-slate-100">Inspection History</p>
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-4">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search vehicle / plate" />
           <select
             aria-label="severity-filter"
@@ -48,6 +49,17 @@ export default function HistoryPage() {
             <option value="low">Low</option>
             <option value="medium">Medium</option>
             <option value="high">High</option>
+          </select>
+          <select
+            aria-label="status-filter"
+            className="h-11 rounded-xl border border-white/15 bg-slate-950/70 px-3 text-sm text-slate-100"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+          >
+            <option value="all">All status</option>
+            <option value="Completed">Completed</option>
+            <option value="Pending">Pending</option>
+            <option value="Failed">Failed</option>
           </select>
           <Input type="date" aria-label="date-filter" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} />
         </div>
