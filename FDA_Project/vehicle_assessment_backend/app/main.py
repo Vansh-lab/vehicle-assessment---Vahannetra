@@ -530,21 +530,20 @@ async def assess_damage(
 @app.get("/view-result/{filename}")
 async def get_result_image(filename: str, current_user: User = Depends(get_current_user)):
     _ = current_user
-    base_dir = UPLOAD_DIR.resolve()
-
-    requested_name = Path(filename)
-    if requested_name.name != filename or filename in {"", ".", ".."}:
+    if not filename or "/" in filename or "\\" in filename or filename in {".", ".."}:
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = (base_dir / requested_name.name).resolve()
+    file_path = next(
+        (
+            candidate
+            for candidate in UPLOAD_DIR.iterdir()
+            if candidate.is_file() and candidate.name == filename
+        ),
+        None,
+    )
 
-    try:
-        file_path.relative_to(base_dir)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    if file_path.exists() and file_path.is_file():
-        return FileResponse(file_path)
+    if file_path:
+        return FileResponse(file_path.resolve())
     raise HTTPException(status_code=404, detail="File not found")
 
 
