@@ -9,7 +9,7 @@ import cv2
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 from app.services.detector import DamageDetector
 from app.utils.assessment import calculate_dsi
@@ -35,17 +35,17 @@ Theme = Literal["dark", "light"]
 
 
 class AuthLoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     otp: Optional[str] = None
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    email: str
 
 
 class VerifyOtpRequest(BaseModel):
-    email: EmailStr
+    email: str
     otp: str
 
 
