@@ -1,30 +1,43 @@
 import os
+import shutil
+from pathlib import Path
+
 from ultralytics import YOLO
+
 
 class DamageDetector:
     def __init__(self):
-        # Path issue fix karne ke liye 'r' (raw string) use kiya hai
-        model_path = r"D:\FDA_Project\vehicle_assessment_backend\app\models\best.pt"
-        self.model = YOLO(model_path)
+        self.model = None
+        self.model_path = Path(__file__).resolve().parent.parent / "models" / "best.pt"
 
-    def analyze_vehicle(self, file_path):
-        # 1. AI Inference (AI se check karwana)
-        results = self.model(file_path)
-        
-        # 2. Processed Image Save karna (jisme boxes honge)
-        # File name ke aage '_detected' jod dega
+        if self.model_path.exists():
+            try:
+                self.model = YOLO(str(self.model_path))
+            except Exception as error:  # pragma: no cover - environment/model dependent
+                print(f"Failed to load YOLO model: {error}")
+        else:
+            print(f"Model not found at {self.model_path}. Running in fallback mode.")
+
+    def analyze_vehicle(self, file_path: str):
         base, ext = os.path.splitext(file_path)
         output_path = f"{base}_detected{ext}"
+
+        if self.model is None:
+            shutil.copy(file_path, output_path)
+            return [], output_path
+
+        results = self.model(file_path)
         results[0].save(filename=output_path)
-        
-        # 3. Detections ko list mein convert karna
+
         detections = []
-        for r in results:
-            for box in r.boxes:
-                detections.append({
-                    "class": self.model.names[int(box.cls)],
-                    "confidence": round(float(box.conf), 2),
-                    "box": box.xyxy[0].tolist() # [x1, y1, x2, y2]
-                })
-        
+        for result in results:
+            for box in result.boxes:
+                detections.append(
+                    {
+                        "class": self.model.names[int(box.cls)],
+                        "confidence": round(float(box.conf), 2),
+                        "box": box.xyxy[0].tolist(),
+                    }
+                )
+
         return detections, output_path
