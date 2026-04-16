@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Camera, ImagePlus, RotateCcw, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -71,6 +71,15 @@ export function PhotoUpload({ file, onFileChange }: PhotoUploadProps) {
   const [warnings, setWarnings] = useState<string[]>([]);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+  const previewObjectUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewObjectUrlRef.current) {
+        URL.revokeObjectURL(previewObjectUrlRef.current);
+      }
+    };
+  }, []);
 
   const isSupportedImageFile = (candidate: File): boolean => candidate.type.startsWith("image/");
 
@@ -102,13 +111,22 @@ export function PhotoUpload({ file, onFileChange }: PhotoUploadProps) {
   const handleFile = async (pickedFile: File | null) => {
     if (!pickedFile || !isSupportedImageFile(pickedFile)) {
       onFileChange(null);
+      if (previewObjectUrlRef.current) {
+        URL.revokeObjectURL(previewObjectUrlRef.current);
+        previewObjectUrlRef.current = null;
+      }
       setPreviewUrl(null);
       setWarnings(["Unsupported file type. Please upload a valid image file."]);
       return;
     }
 
     onFileChange(pickedFile);
-    setPreviewUrl(URL.createObjectURL(pickedFile));
+    const nextPreviewUrl = URL.createObjectURL(pickedFile);
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(previewObjectUrlRef.current);
+    }
+    previewObjectUrlRef.current = nextPreviewUrl;
+    setPreviewUrl(nextPreviewUrl);
     await validateImage(pickedFile);
   };
 
