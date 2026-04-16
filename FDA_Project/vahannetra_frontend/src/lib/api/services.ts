@@ -2,13 +2,14 @@ import type {
   AnalyticsPoint,
   AuthResponse,
   BackendAssessDamageResponse,
+  ClaimSubmitResponse,
   FleetHealth,
   NewInspectionPayload,
   NotificationPreferences,
   ResultResponse,
   SettingsResponse,
 } from "@/lib/api/types";
-import { API_BASE_URL, apiRequest } from "@/lib/api/client";
+import { API_BASE_URL, apiBinaryRequest, apiRequest } from "@/lib/api/client";
 import {
   mockAnalytics,
   mockFleetHealth,
@@ -89,11 +90,15 @@ export async function loginWithBackend(payload: {
     };
   }
 
-  return apiRequest<AuthResponse>("/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  return apiRequest<AuthResponse>(
+    "/auth/login",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    { auth: false },
+  );
 }
 
 export async function assessDamageWithBackend(
@@ -113,7 +118,7 @@ export async function assessDamageWithBackend(
   const severity = mapSeverityFromScore(data.inspection_summary.dsi_score);
 
   return {
-    inspectionId: `INSP-${Date.now()}`,
+    inspectionId: data.inspection_id ?? `INSP-${Date.now()}`,
     vehicle: {
       plate: payload.plate,
       model: payload.model,
@@ -298,6 +303,34 @@ export function getInspectionReportUrl(id: string) {
   return `${API_BASE_URL}/inspections/${id}/report.pdf`;
 }
 
+
+export async function downloadInspectionReport(id: string): Promise<string> {
+  if (!USE_BACKEND) {
+    return getInspectionReportUrl(id);
+  }
+  const blob = await apiBinaryRequest(`/inspections/${id}/report.pdf`);
+  const url = URL.createObjectURL(blob);
+  return url;
+}
+
+export async function submitClaim(inspectionId: string, destination = "default-claims-provider"): Promise<ClaimSubmitResponse> {
+  if (!USE_BACKEND) {
+    await delay(600);
+    return {
+      claim_id: `CLM-${Date.now()}`,
+      inspection_id: inspectionId,
+      status: "Submitted",
+      provider_reference: `MOCK-${Math.random().toString(36).slice(2, 8)}`,
+    };
+  }
+
+  return apiRequest<ClaimSubmitResponse>("/claims/submit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ inspection_id: inspectionId, destination }),
+  });
+}
+
 export async function getAnalytics(): Promise<{
   trends: AnalyticsPoint[];
   riskRanking: { model: string; risk: number }[];
@@ -350,6 +383,7 @@ export async function getSettings(): Promise<SettingsResponse> {
     await delay(300);
     return {
       organization: {
+        id: "org_mock",
         name: "Acme Claims Pvt Ltd",
         region: "Mumbai",
         active_inspectors: 42,

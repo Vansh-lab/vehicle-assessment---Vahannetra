@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type MouseEvent, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import Link from "next/link";
-import { getHistory, getInspectionReportUrl } from "@/lib/api/services";
+import { downloadInspectionReport, getHistory } from "@/lib/api/services";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,13 @@ export default function HistoryPage() {
   });
 
   const filtered = useMemo(() => data ?? [], [data]);
+
+  const handleDownload = async (inspectionId: string, event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const url = await downloadInspectionReport(inspectionId);
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   return (
     <div className="space-y-4">
@@ -67,11 +74,9 @@ export default function HistoryPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge className="capitalize">{item.severity}</Badge>
-                  <a href={getInspectionReportUrl(item.id)} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
-                    <Button size="sm" variant="secondary">
-                      <Download size={14} className="mr-1" /> PDF
-                    </Button>
-                  </a>
+                  <Button size="sm" variant="secondary" onClick={(event) => void handleDownload(item.id, event)}>
+                    <Download size={14} className="mr-1" /> PDF
+                  </Button>
                 </div>
               </div>
             </Card>

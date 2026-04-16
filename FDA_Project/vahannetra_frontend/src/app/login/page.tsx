@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { loginWithBackend } from "@/lib/api/services";
+import { isSessionActive, setSessionFromAuth } from "@/lib/auth/session";
 
 const schema = z.object({
   email: z.string().email("Enter a valid work email"),
@@ -35,11 +36,18 @@ export default function LoginPage() {
     defaultValues: { email: "", password: "", otp: "" },
   });
 
+  useEffect(() => {
+    if (isSessionActive()) {
+      router.replace("/dashboard");
+    }
+  }, [router]);
+
   const onSubmit = async (values: LoginValues) => {
     try {
       setSubmitting(true);
       setError("");
-      await loginWithBackend(values);
+      const auth = await loginWithBackend(values);
+      setSessionFromAuth(auth);
       router.push("/dashboard");
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Login failed");

@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import { getInspectionDetail, getInspectionReportUrl } from "@/lib/api/services";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { downloadInspectionReport, getInspectionDetail } from "@/lib/api/services";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,13 @@ export default function HistoryDetailPage() {
     queryKey: ["inspection-detail", id],
     queryFn: () => getInspectionDetail(id),
     enabled: !!id,
+  });
+
+  const downloadMutation = useMutation({
+    mutationFn: async () => downloadInspectionReport(id),
+    onSuccess: (url) => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
   });
 
   if (isLoading) return <Skeleton className="h-44" />;
@@ -39,9 +46,9 @@ export default function HistoryDetailPage() {
         <p className="text-sm text-slate-300">Inspected at: {new Date(data.vehicle.inspectedAt).toLocaleString()}</p>
       </Card>
       <div className="grid gap-2 sm:grid-cols-2">
-        <a href={getInspectionReportUrl(data.inspectionId)} target="_blank" rel="noreferrer">
-          <Button className="w-full">Download PDF report</Button>
-        </a>
+        <Button className="w-full" onClick={() => downloadMutation.mutate()} disabled={downloadMutation.isPending}>
+          {downloadMutation.isPending ? "Preparing PDF..." : "Download PDF report"}
+        </Button>
         <Link href="/inspection/result">
           <Button variant="secondary" className="w-full">
             Open visual diagnostics

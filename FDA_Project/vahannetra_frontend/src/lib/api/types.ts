@@ -6,6 +6,7 @@ export interface BackendAssessDamageResponse {
     overall_severity: "High" | "Moderate";
     triage_category: "COSMETIC" | "STRUCTURAL/FUNCTIONAL";
   };
+  inspection_id?: string;
   processed_image_url: string;
   findings: Array<{
     class: string;
@@ -72,8 +73,16 @@ export interface AuthResponse {
   organization: AuthOrganization;
 }
 
+export interface ClaimSubmitResponse {
+  claim_id: string;
+  inspection_id: string;
+  status: string;
+  provider_reference: string;
+}
+
 export interface SettingsResponse {
   organization: {
+    id?: string;
     name: string;
     region: string;
     active_inspectors: number;

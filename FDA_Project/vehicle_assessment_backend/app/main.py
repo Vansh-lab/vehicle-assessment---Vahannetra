@@ -1,21 +1,38 @@
+import json
 import os
-import secrets
+import random
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal, Optional
 
 import cv2
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
+from app.auth import (
+    create_access_token,
+    create_refresh_token,
+    exchange_refresh_token,
+    get_current_user,
+    hash_password,
+    hash_secret,
+    require_roles,
+    verify_password,
+)
+from app.database import Base, engine, get_db
+from app.db_models import Claim, Inspection, Organization, OtpCode, RefreshToken, Setting, User
+from app.otp_provider import get_otp_provider
+from app.pdf_reports import render_inspection_report
 from app.services.detector import DamageDetector
 from app.utils.assessment import calculate_dsi
 
 app = FastAPI(title="AI Vehicle Assessment Backend")
 detector = DamageDetector()
+otp_provider = get_otp_provider()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -32,12 +49,17 @@ app.add_middleware(
 SeverityLevel = Literal["low", "medium", "high"]
 InspectionStatus = Literal["Completed", "Pending", "Failed"]
 Theme = Literal["dark", "light"]
+UserRole = Literal["admin", "manager", "inspector"]
 
 
 class AuthLoginRequest(BaseModel):
     email: str
     password: str
     otp: Optional[str] = None
+
+
+class AuthRefreshRequest(BaseModel):
+    refresh_token: str
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -47,6 +69,10 @@ class ForgotPasswordRequest(BaseModel):
 class VerifyOtpRequest(BaseModel):
     email: str
     otp: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
 
 
 class VehicleSummary(BaseModel):
@@ -108,6 +134,7 @@ class NotificationPreferences(BaseModel):
 
 
 class OrganizationInfo(BaseModel):
+    id: str
     name: str
     region: str
     active_inspectors: int
@@ -124,103 +151,26 @@ class SettingsPatchRequest(BaseModel):
     notifications: Optional[NotificationPreferences] = None
 
 
-MOCK_HISTORY: list[InspectionHistoryItem] = [
-    InspectionHistoryItem(
-        id="INSP-1021",
-        plate="MH12AB9087",
-        model="Hyundai i20",
-        date="2026-04-15T10:20:00Z",
-        severity="medium",
-        status="Completed",
-        risk_score=58,
-    ),
-    InspectionHistoryItem(
-        id="INSP-1022",
-        plate="DL3CB7781",
-        model="Honda Activa",
-        date="2026-04-15T11:42:00Z",
-        severity="low",
-        status="Completed",
-        risk_score=31,
-    ),
-    InspectionHistoryItem(
-        id="INSP-1023",
-        plate="KA05MN2211",
-        model="Tata Nexon",
-        date="2026-04-15T13:15:00Z",
-        severity="high",
-        status="Completed",
-        risk_score=84,
-    ),
-]
-
-MOCK_DETAILS: dict[str, InspectionDetail] = {
-    "INSP-1021": InspectionDetail(
-        inspection_id="INSP-1021",
-        vehicle=VehicleSummary(
-            plate="MH12AB9087",
-            model="Hyundai i20",
-            vin="MA3EHKD17A1234567",
-            type="4W",
-            inspected_at="2026-04-15T10:20:00Z",
-        ),
-        health_score=63,
-        triage_category="STRUCTURAL/FUNCTIONAL",
-        processed_image_url="uploads/Sample2_Image_detected.jpg",
-        findings=[
-            DamageFinding(
-                id="DMG-1",
-                type="dent",
-                severity="high",
-                confidence=0.93,
-                category="Functional",
-                estimate_min=8500,
-                estimate_max=14000,
-                explainability="Panel deformation and contour discontinuity suggest high impact dent.",
-                box=[40, 80, 210, 220],
-            ),
-            DamageFinding(
-                id="DMG-2",
-                type="scratch",
-                severity="medium",
-                confidence=0.88,
-                category="Cosmetic",
-                estimate_min=2500,
-                estimate_max=4900,
-                explainability="Linear surface discontinuity indicates layered paint damage.",
-                box=[250, 120, 390, 195],
-            ),
-        ],
-    )
-}
-
-SETTINGS_STATE = SettingsResponse(
-    organization=OrganizationInfo(name="Acme Claims Pvt Ltd", region="Mumbai", active_inspectors=42),
-    notifications=NotificationPreferences(push=True, email=True, critical_only=False),
-    theme="dark",
-)
+class ClaimSubmitRequest(BaseModel):
+    inspection_id: str
+    destination: str = Field(default="default-claims-provider")
 
 
-def issue_token_bundle(email: str):
-    now = datetime.utcnow().isoformat() + "Z"
-    return {
-        "access_token": secrets.token_urlsafe(24),
-        "refresh_token": secrets.token_urlsafe(32),
-        "token_type": "bearer",
-        "expires_in": 3600,
-        "issued_at": now,
-        "user": {
-            "id": "usr_001",
-            "name": "Field Inspector",
-            "email": email,
-            "role": "inspector",
-        },
-        "organization": {
-            "id": "org_001",
-            "name": SETTINGS_STATE.organization.name,
-            "region": SETTINGS_STATE.organization.region,
-        },
-    }
+class ClaimSubmitResponse(BaseModel):
+    claim_id: str
+    inspection_id: str
+    status: str
+    provider_reference: str
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int = 1800
+    issued_at: str
+    user: dict
+    organization: dict
 
 
 def map_severity(score: float) -> SeverityLevel:
@@ -231,47 +181,303 @@ def map_severity(score: float) -> SeverityLevel:
     return "low"
 
 
+def normalize_detection_type(raw_name: str) -> str:
+    normalized = raw_name.lower()
+    if normalized in {"scratch", "dent", "crack", "broken part", "paint damage"}:
+        return normalized
+    return "paint damage"
+
+
+def finding_from_detection(index: int, det: dict, severity: SeverityLevel, triage_category: str) -> DamageFinding:
+    return DamageFinding(
+        id=f"DMG-{index + 1}",
+        type=normalize_detection_type(str(det.get("class", "paint damage"))),
+        severity=severity,
+        confidence=float(det.get("confidence", 0)),
+        category="Cosmetic" if triage_category == "COSMETIC" else "Functional",
+        estimate_min=8000 if severity == "high" else 3000 if severity == "medium" else 1200,
+        estimate_max=18000 if severity == "high" else 7000 if severity == "medium" else 2800,
+        explainability=f"Detected {det.get('class', 'damage')} based on contour/texture anomalies.",
+        box=[float(x) for x in det.get("box", [0, 0, 0, 0])],
+    )
+
+
+def issue_token_bundle(db: Session, user: User, organization: Organization) -> AuthResponse:
+    return AuthResponse(
+        access_token=create_access_token(user),
+        refresh_token=create_refresh_token(db, user),
+        issued_at=datetime.utcnow().isoformat() + "Z",
+        user={
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role,
+        },
+        organization={
+            "id": organization.id,
+            "name": organization.name,
+            "region": organization.region,
+        },
+    )
+
+
+def to_history_item(record: Inspection) -> InspectionHistoryItem:
+    return InspectionHistoryItem(
+        id=record.id,
+        plate=record.plate,
+        model=record.model,
+        date=record.date.isoformat() + "Z",
+        severity=record.severity,
+        status=record.status,
+        risk_score=record.risk_score,
+    )
+
+
+def to_inspection_detail(record: Inspection) -> InspectionDetail:
+    findings_payload = json.loads(record.findings_json or "[]")
+    findings = [DamageFinding(**item) for item in findings_payload]
+    return InspectionDetail(
+        inspection_id=record.id,
+        vehicle=VehicleSummary(
+            plate=record.plate,
+            model=record.model,
+            vin=record.vin,
+            type=record.vehicle_type,
+            inspected_at=record.date.isoformat() + "Z",
+        ),
+        health_score=record.health_score,
+        triage_category=record.triage_category,
+        processed_image_url=record.processed_image_url,
+        findings=findings,
+    )
+
+
+def init_seed_data() -> None:
+    Base.metadata.create_all(bind=engine)
+    db = next(get_db())
+    try:
+        if db.query(Organization).count() > 0:
+            return
+
+        org = Organization(id="org_001", name="Acme Claims Pvt Ltd", region="Mumbai", active_inspectors=42)
+        admin = User(
+            id="usr_001",
+            email="ops@insurer.com",
+            name="Field Inspector",
+            role="admin",
+            password_hash=hash_password("password123"),
+            organization_id=org.id,
+        )
+        setting = Setting(organization_id=org.id, push=True, email=True, critical_only=False, theme="dark")
+
+        sample_inspections = [
+            Inspection(
+                id="INSP-1021",
+                organization_id=org.id,
+                plate="MH12AB9087",
+                model="Hyundai i20",
+                vin="MA3EHKD17A1234567",
+                vehicle_type="4W",
+                date=datetime.utcnow() - timedelta(hours=8),
+                severity="medium",
+                status="Completed",
+                risk_score=58,
+                health_score=63,
+                triage_category="STRUCTURAL/FUNCTIONAL",
+                processed_image_url="uploads/Sample2_Image_detected.jpg",
+                findings_json=json.dumps(
+                    [
+                        DamageFinding(
+                            id="DMG-1",
+                            type="dent",
+                            severity="high",
+                            confidence=0.93,
+                            category="Functional",
+                            estimate_min=8500,
+                            estimate_max=14000,
+                            explainability="Panel deformation and contour discontinuity suggest high impact dent.",
+                            box=[40, 80, 210, 220],
+                        ).model_dump(),
+                        DamageFinding(
+                            id="DMG-2",
+                            type="scratch",
+                            severity="medium",
+                            confidence=0.88,
+                            category="Cosmetic",
+                            estimate_min=2500,
+                            estimate_max=4900,
+                            explainability="Linear surface discontinuity indicates layered paint damage.",
+                            box=[250, 120, 390, 195],
+                        ).model_dump(),
+                    ]
+                ),
+            ),
+            Inspection(
+                id="INSP-1022",
+                organization_id=org.id,
+                plate="DL3CB7781",
+                model="Honda Activa",
+                vehicle_type="Scooter",
+                date=datetime.utcnow() - timedelta(hours=6),
+                severity="low",
+                status="Completed",
+                risk_score=31,
+                health_score=86,
+                triage_category="COSMETIC",
+                processed_image_url="uploads/Sample_Image_detected.jpg",
+                findings_json="[]",
+            ),
+            Inspection(
+                id="INSP-1023",
+                organization_id=org.id,
+                plate="KA05MN2211",
+                model="Tata Nexon",
+                vehicle_type="4W",
+                date=datetime.utcnow() - timedelta(hours=4),
+                severity="high",
+                status="Completed",
+                risk_score=84,
+                health_score=42,
+                triage_category="STRUCTURAL/FUNCTIONAL",
+                processed_image_url="uploads/Sample3_Image_detected.jpg",
+                findings_json="[]",
+            ),
+        ]
+
+        db.add(org)
+        db.add(admin)
+        db.add(setting)
+        for item in sample_inspections:
+            db.add(item)
+        db.commit()
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    init_seed_data()
+
+
 @app.get("/")
 async def root():
     return {"message": "AI Vehicle Assessment API is running", "docs": "/docs"}
 
 
-@app.post("/auth/login")
-async def auth_login(payload: AuthLoginRequest):
-    if len(payload.password) < 6:
-        raise HTTPException(status_code=400, detail="Password too short")
-    return issue_token_bundle(payload.email)
+@app.post("/auth/login", response_model=AuthResponse)
+async def auth_login(payload: AuthLoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email.lower()).first()
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    organization = db.query(Organization).filter(Organization.id == user.organization_id).first()
+    if not organization:
+        raise HTTPException(status_code=500, detail="Organization not found")
+
+    return issue_token_bundle(db, user, organization)
+
+
+@app.post("/auth/refresh", response_model=AuthResponse)
+async def auth_refresh(payload: AuthRefreshRequest, db: Session = Depends(get_db)):
+    user = exchange_refresh_token(db, payload.refresh_token)
+    organization = db.query(Organization).filter(Organization.id == user.organization_id).first()
+    if not organization:
+        raise HTTPException(status_code=500, detail="Organization not found")
+    return issue_token_bundle(db, user, organization)
+
+
+@app.post("/auth/logout")
+async def auth_logout(payload: LogoutRequest, db: Session = Depends(get_db)):
+    token_hash = hash_secret(payload.refresh_token)
+    token_record = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
+    if token_record:
+        token_record.revoked = True
+        db.commit()
+    return {"message": "Logged out"}
 
 
 @app.post("/auth/forgot-password")
-async def auth_forgot_password(payload: ForgotPasswordRequest):
-    return {
-        "message": f"Password reset OTP sent to {payload.email}",
-        "otp_required": True,
-        "channel": "email",
-    }
+async def auth_forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email.lower()).first()
+    if not user:
+        return {"message": "If this email exists, an OTP has been sent", "otp_required": True, "channel": "email"}
+
+    otp_code = str(random.randint(100000, 999999))
+    db.add(
+        OtpCode(
+            email=user.email,
+            code_hash=hash_secret(otp_code),
+            purpose="forgot_password",
+            expires_at=datetime.utcnow() + timedelta(minutes=10),
+            used=False,
+        )
+    )
+    db.commit()
+
+    otp_provider.send_otp(user.email, otp_code)
+    return {"message": f"OTP sent to {user.email}", "otp_required": True, "channel": "email"}
 
 
-@app.post("/auth/verify-otp")
-async def auth_verify_otp(payload: VerifyOtpRequest):
-    if payload.otp != "123456":
-        raise HTTPException(status_code=400, detail="Invalid OTP")
-    return issue_token_bundle(payload.email)
+@app.post("/auth/verify-otp", response_model=AuthResponse)
+async def auth_verify_otp(payload: VerifyOtpRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email.lower()).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    otp_record = (
+        db.query(OtpCode)
+        .filter(OtpCode.email == user.email, OtpCode.purpose == "forgot_password", OtpCode.used.is_(False))
+        .order_by(OtpCode.id.desc())
+        .first()
+    )
+    if not otp_record or otp_record.expires_at < datetime.utcnow() or otp_record.code_hash != hash_secret(payload.otp):
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+    otp_record.used = True
+    db.commit()
+
+    organization = db.query(Organization).filter(Organization.id == user.organization_id).first()
+    if not organization:
+        raise HTTPException(status_code=500, detail="Organization not found")
+
+    return issue_token_bundle(db, user, organization)
 
 
 @app.get("/dashboard/overview", response_model=DashboardOverviewResponse)
-async def dashboard_overview():
-    health = FleetHealth(score=82, attention_vehicles=14, inspections_today=28, active_alerts=5)
-    attention = [item for item in MOCK_HISTORY if item.severity in ("medium", "high")]
+async def dashboard_overview(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    all_items = (
+        db.query(Inspection)
+        .filter(Inspection.organization_id == current_user.organization_id)
+        .order_by(Inspection.date.desc())
+        .all()
+    )
+    recent = all_items[:10]
+    attention = [item for item in all_items if item.severity in ("medium", "high")][:10]
+
+    avg_health = int(sum([item.health_score for item in all_items]) / len(all_items)) if all_items else 100
+    health = FleetHealth(
+        score=avg_health,
+        attention_vehicles=len(attention),
+        inspections_today=len([item for item in all_items if item.date.date() == datetime.utcnow().date()]),
+        active_alerts=len([item for item in all_items if item.severity == "high"]),
+    )
+
     return DashboardOverviewResponse(
         fleet_health=health,
-        recent_inspections=MOCK_HISTORY,
-        vehicles_requiring_attention=attention,
+        recent_inspections=[to_history_item(item) for item in recent],
+        vehicles_requiring_attention=[to_history_item(item) for item in attention],
     )
 
 
 @app.post("/assess-damage/")
-async def assess_damage(file: UploadFile = File(...)):
+async def assess_damage(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     safe_name = f"{uuid.uuid4().hex}_{file.filename}"
     file_path = UPLOAD_DIR / safe_name
     with open(file_path, "wb") as output_file:
@@ -282,6 +488,32 @@ async def assess_damage(file: UploadFile = File(...)):
     image = cv2.imread(str(file_path))
     dsi_score = calculate_dsi(raw_detections, image.shape) if image is not None else 0
     triage_category = "COSMETIC" if dsi_score < 40 else "STRUCTURAL/FUNCTIONAL"
+    severity = map_severity(dsi_score)
+
+    finding_models = [
+        finding_from_detection(index=index, det=det, severity=severity, triage_category=triage_category)
+        for index, det in enumerate(raw_detections)
+    ]
+
+    inspection_id = f"INSP-{int(datetime.utcnow().timestamp())}-{uuid.uuid4().hex[:6]}"
+    inspection = Inspection(
+        id=inspection_id,
+        organization_id=current_user.organization_id,
+        plate="Unknown",
+        model="Unknown",
+        vin=None,
+        vehicle_type="4W",
+        date=datetime.utcnow(),
+        severity=severity,
+        status="Completed",
+        risk_score=min(100, int(dsi_score)),
+        health_score=max(0, 100 - int(dsi_score)),
+        triage_category=triage_category,
+        processed_image_url=f"uploads/{Path(processed_img_path).name}",
+        findings_json=json.dumps([finding.model_dump() for finding in finding_models]),
+    )
+    db.add(inspection)
+    db.commit()
 
     return {
         "inspection_summary": {
@@ -289,13 +521,15 @@ async def assess_damage(file: UploadFile = File(...)):
             "overall_severity": "High" if dsi_score > 60 else "Moderate",
             "triage_category": triage_category,
         },
+        "inspection_id": inspection_id,
         "processed_image_url": f"uploads/{Path(processed_img_path).name}",
         "findings": raw_detections,
     }
 
 
 @app.get("/view-result/{filename}")
-async def get_result_image(filename: str):
+async def get_result_image(filename: str, current_user: User = Depends(get_current_user)):
+    _ = current_user
     file_path = UPLOAD_DIR / filename
     if file_path.exists():
         return FileResponse(file_path)
@@ -308,110 +542,208 @@ async def list_inspections(
     severity: Optional[SeverityLevel] = Query(default=None),
     status: Optional[InspectionStatus] = Query(default=None),
     date: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    items = MOCK_HISTORY[:]
+    query = db.query(Inspection).filter(Inspection.organization_id == current_user.organization_id)
 
     if search:
-        query = search.lower()
-        items = [item for item in items if query in item.plate.lower() or query in item.model.lower()]
+        search_value = f"%{search.lower()}%"
+        query = query.filter((Inspection.plate.ilike(search_value)) | (Inspection.model.ilike(search_value)))
 
     if severity:
-        items = [item for item in items if item.severity == severity]
+        query = query.filter(Inspection.severity == severity)
 
     if status:
-        items = [item for item in items if item.status == status]
+        query = query.filter(Inspection.status == status)
 
+    records = query.order_by(Inspection.date.desc()).all()
     if date:
-        items = [item for item in items if item.date.startswith(date)]
+        records = [item for item in records if item.date.date().isoformat() == date]
 
-    return items
+    return [to_history_item(item) for item in records]
 
 
 @app.get("/inspections/{inspection_id}", response_model=InspectionDetail)
-async def get_inspection_detail(inspection_id: str):
-    detail = MOCK_DETAILS.get(inspection_id)
-    if not detail:
+async def get_inspection_detail(
+    inspection_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    record = (
+        db.query(Inspection)
+        .filter(Inspection.id == inspection_id, Inspection.organization_id == current_user.organization_id)
+        .first()
+    )
+    if not record:
         raise HTTPException(status_code=404, detail="Inspection not found")
-    return detail
-
-
-def build_simple_pdf(content: str) -> bytes:
-    text = content.replace("(", "[").replace(")", "]")
-    body = f"BT /F1 12 Tf 40 760 Td ({text}) Tj ET"
-    pdf = f"%PDF-1.4\n1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj\n4 0 obj<< /Length {len(body)} >>stream\n{body}\nendstream\nendobj\n5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\ntrailer<< /Root 1 0 R >>\n%%EOF"
-    return pdf.encode("utf-8")
+    return to_inspection_detail(record)
 
 
 @app.get("/inspections/{inspection_id}/report.pdf")
-async def download_report(inspection_id: str):
-    detail = MOCK_DETAILS.get(inspection_id)
-    if not detail:
+async def download_report(
+    inspection_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    record = (
+        db.query(Inspection)
+        .filter(Inspection.id == inspection_id, Inspection.organization_id == current_user.organization_id)
+        .first()
+    )
+    if not record:
         raise HTTPException(status_code=404, detail="Inspection not found")
 
-    summary = (
-        f"Inspection: {detail.inspection_id} | Vehicle: {detail.vehicle.plate} {detail.vehicle.model} | "
-        f"Health Score: {detail.health_score} | Findings: {len(detail.findings)}"
+    detail = to_inspection_detail(record)
+    pdf_bytes = render_inspection_report(
+        {
+            "inspection_id": detail.inspection_id,
+            "vehicle": detail.vehicle.model_dump(),
+            "health_score": detail.health_score,
+            "triage_category": detail.triage_category,
+            "findings": [item.model_dump() for item in detail.findings],
+        }
     )
-    payload = build_simple_pdf(summary)
+
     return Response(
-        content=payload,
+        content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{inspection_id}.pdf"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{inspection_id}.pdf"',
+            "X-Report-Signature": hash_secret(inspection_id + str(record.date.timestamp())),
+        },
+    )
+
+
+@app.post("/claims/submit", response_model=ClaimSubmitResponse)
+async def submit_claim(
+    payload: ClaimSubmitRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("admin", "manager", "inspector")),
+):
+    inspection = (
+        db.query(Inspection)
+        .filter(Inspection.id == payload.inspection_id, Inspection.organization_id == current_user.organization_id)
+        .first()
+    )
+    if not inspection:
+        raise HTTPException(status_code=404, detail="Inspection not found")
+
+    claim_id = f"CLM-{uuid.uuid4().hex[:10].upper()}"
+    provider_ref = f"{payload.destination.upper()}-{uuid.uuid4().hex[:8]}"
+    claim = Claim(
+        id=claim_id,
+        inspection_id=inspection.id,
+        organization_id=current_user.organization_id,
+        status="Submitted",
+        provider_ref=provider_ref,
+    )
+    db.add(claim)
+    db.commit()
+
+    return ClaimSubmitResponse(
+        claim_id=claim_id,
+        inspection_id=inspection.id,
+        status="Submitted",
+        provider_reference=provider_ref,
     )
 
 
 @app.get("/analytics/damage-distribution")
-async def analytics_damage_distribution():
-    distribution = {
-        "scratch": 12,
-        "dent": 8,
-        "crack": 3,
-        "broken part": 2,
-        "paint damage": 7,
-    }
-    return {"items": [{"category": key, "count": value} for key, value in distribution.items()]}
+async def analytics_damage_distribution(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    inspections = db.query(Inspection).filter(Inspection.organization_id == current_user.organization_id).all()
+    counts = {"scratch": 0, "dent": 0, "crack": 0, "broken part": 0, "paint damage": 0}
+
+    for inspection in inspections:
+        for item in json.loads(inspection.findings_json or "[]"):
+            kind = item.get("type", "paint damage")
+            if kind not in counts:
+                kind = "paint damage"
+            counts[kind] += 1
+
+    return {"items": [{"category": key, "count": value} for key, value in counts.items()]}
 
 
 @app.get("/analytics/severity-trends")
-async def analytics_severity_trends():
-    return {
-        "trends": [
-            {"month": "Jan", "low": 28, "medium": 14, "high": 5},
-            {"month": "Feb", "low": 22, "medium": 16, "high": 6},
-            {"month": "Mar", "low": 30, "medium": 18, "high": 8},
-            {"month": "Apr", "low": 26, "medium": 19, "high": 7},
-            {"month": "May", "low": 33, "medium": 15, "high": 9},
-        ]
-    }
+async def analytics_severity_trends(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    inspections = db.query(Inspection).filter(Inspection.organization_id == current_user.organization_id).all()
+    bucket: dict[str, dict[str, int]] = {}
+    for item in inspections:
+        month = item.date.strftime("%b")
+        if month not in bucket:
+            bucket[month] = {"low": 0, "medium": 0, "high": 0}
+        bucket[month][item.severity] += 1
+
+    trends = [{"month": month, **counts} for month, counts in bucket.items()]
+    return {"trends": trends}
 
 
 @app.get("/analytics/vehicle-risk-ranking")
-async def analytics_vehicle_risk_ranking():
-    return {
-        "ranking": [
-            {"model": "Mahindra Bolero", "risk": 82},
-            {"model": "Tata Ace", "risk": 78},
-            {"model": "Hyundai i20", "risk": 61},
-            {"model": "Maruti Swift", "risk": 47},
-        ]
-    }
+async def analytics_vehicle_risk_ranking(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    inspections = db.query(Inspection).filter(Inspection.organization_id == current_user.organization_id).all()
+    score_by_model: dict[str, list[int]] = {}
+    for item in inspections:
+        score_by_model.setdefault(item.model, []).append(item.risk_score)
+
+    ranking = [
+        {"model": model, "risk": int(sum(scores) / len(scores))}
+        for model, scores in score_by_model.items()
+        if model
+    ]
+    ranking.sort(key=lambda entry: entry["risk"], reverse=True)
+    return {"ranking": ranking}
 
 
 @app.get("/settings", response_model=SettingsResponse)
-async def get_settings():
-    return SETTINGS_STATE
+async def get_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    setting = db.query(Setting).filter(Setting.organization_id == current_user.organization_id).first()
+    if not org or not setting:
+        raise HTTPException(status_code=404, detail="Settings not found")
+
+    return SettingsResponse(
+        organization=OrganizationInfo(id=org.id, name=org.name, region=org.region, active_inspectors=org.active_inspectors),
+        notifications=NotificationPreferences(push=setting.push, email=setting.email, critical_only=setting.critical_only),
+        theme=setting.theme,
+    )
 
 
 @app.patch("/settings", response_model=SettingsResponse)
-async def patch_settings(payload: SettingsPatchRequest):
-    global SETTINGS_STATE
+async def patch_settings(
+    payload: SettingsPatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("admin", "manager")),
+):
+    setting = db.query(Setting).filter(Setting.organization_id == current_user.organization_id).first()
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    if not setting or not org:
+        raise HTTPException(status_code=404, detail="Settings not found")
 
-    updated_theme = payload.theme or SETTINGS_STATE.theme
-    updated_notifications = payload.notifications or SETTINGS_STATE.notifications
+    if payload.theme is not None:
+        setting.theme = payload.theme
 
-    SETTINGS_STATE = SettingsResponse(
-        organization=SETTINGS_STATE.organization,
-        notifications=updated_notifications,
-        theme=updated_theme,
+    if payload.notifications is not None:
+        setting.push = payload.notifications.push
+        setting.email = payload.notifications.email
+        setting.critical_only = payload.notifications.critical_only
+
+    db.commit()
+    db.refresh(setting)
+
+    return SettingsResponse(
+        organization=OrganizationInfo(id=org.id, name=org.name, region=org.region, active_inspectors=org.active_inspectors),
+        notifications=NotificationPreferences(push=setting.push, email=setting.email, critical_only=setting.critical_only),
+        theme=setting.theme,
     )
-    return SETTINGS_STATE
