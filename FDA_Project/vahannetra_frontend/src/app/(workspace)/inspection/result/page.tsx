@@ -1,0 +1,80 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { Download, FileUp, Flame, ShieldCheck } from "lucide-react";
+import { useInspectionStore } from "@/store/inspection-store";
+import { mockInspectionResult } from "@/lib/api/mock-data";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { AnnotatedImageViewer } from "@/components/results/annotated-image-viewer";
+import { DamageCard } from "@/components/results/damage-card";
+import { ConfidenceMeter } from "@/components/results/confidence-meter";
+import { CostEstimateWidget } from "@/components/results/cost-estimate-widget";
+
+export default function ResultPage() {
+  const [heatmapEnabled, setHeatmapEnabled] = useState(true);
+  const { latestResult } = useInspectionStore();
+  const result = latestResult ?? mockInspectionResult;
+
+  const confidence = useMemo(() => {
+    if (!result.findings.length) return 0;
+    const total = result.findings.reduce((sum, finding) => sum + finding.confidence, 0);
+    return (total / result.findings.length) * 100;
+  }, [result.findings]);
+
+  const costRange = useMemo(() => result.findings.reduce((acc, finding) => ({ min: acc.min + finding.estimateMin, max: acc.max + finding.estimateMax }), { min: 0, max: 0 }), [result.findings]);
+  const groupedCount = useMemo(() => result.findings.reduce<Record<string, number>>((acc, finding) => { acc[finding.type] = (acc[finding.type] ?? 0) + 1; return acc; }, {}), [result.findings]);
+
+  return (
+    <div className="space-y-4 pb-4">
+      <Card className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-slate-400">Vehicle Summary</p>
+          <p className="text-lg font-semibold text-cyan-100">{result.vehicle.plate} • {result.vehicle.model} • {result.vehicle.type}</p>
+          <p className="text-xs text-slate-400">Inspection ID: {result.inspectionId}</p>
+        </div>
+        <Badge className={result.triageCategory === "STRUCTURAL/FUNCTIONAL" ? "bg-rose-500/20 text-rose-100 border-rose-300/30" : ""}>{result.triageCategory}</Badge>
+      </Card>
+
+      <Card>
+        <p className="mb-2 text-sm font-semibold text-slate-100">Damage count by category</p>
+        <div className="flex flex-wrap gap-2">
+          {Object.entries(groupedCount).map(([key, value]) => <Badge key={key} className="capitalize border-white/20 bg-white/10 text-slate-200">{key}: {value}</Badge>)}
+        </div>
+      </Card>
+
+      <AnnotatedImageViewer imageUrl={result.processedImageUrl} findings={result.findings} heatmapEnabled={heatmapEnabled} />
+
+      <Card className="flex items-center justify-between">
+        <p className="text-sm text-slate-200">Heatmap visualization</p>
+        <Switch checked={heatmapEnabled} onCheckedChange={setHeatmapEnabled} label="Heatmap toggle" />
+      </Card>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <Card className="space-y-4">
+          <ConfidenceMeter confidence={confidence} />
+          <div className="flex items-center gap-2 text-sm text-slate-200"><Flame size={16} className="text-amber-300" /> Severity badge: <Badge>{result.findings.some((item) => item.severity === "high") ? "High" : "Moderate"}</Badge></div>
+        </Card>
+        <CostEstimateWidget min={costRange.min} max={costRange.max} />
+      </div>
+
+      <div className="grid gap-3">{result.findings.map((finding) => <DamageCard key={finding.id} finding={finding} />)}</div>
+
+      <Card>
+        <p className="text-sm font-semibold text-slate-100">Explainability</p>
+        <ul className="mt-2 space-y-2 text-sm text-slate-300">
+          {result.findings.map((finding) => <li key={`${finding.id}-exp`} className="rounded-xl border border-white/10 p-3"><span className="font-medium capitalize text-cyan-100">{finding.type}:</span> {finding.explainability}</li>)}
+        </ul>
+      </Card>
+
+      <div className="sticky bottom-16 grid gap-2 md:bottom-4 md:grid-cols-2">
+        <Button variant="secondary"><FileUp size={16} className="mr-2" /> Send to claim system</Button>
+        <Button><Download size={16} className="mr-2" /> Download report</Button>
+      </div>
+
+      <Card className="border-cyan-400/20"><p className="flex items-center gap-2 text-sm text-cyan-100"><ShieldCheck size={16} /> AI result confidence & explainability included for auditor trust.</p></Card>
+    </div>
+  );
+}

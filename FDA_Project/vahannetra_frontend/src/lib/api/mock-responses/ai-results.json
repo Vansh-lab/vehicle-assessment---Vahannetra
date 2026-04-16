@@ -1,0 +1,37 @@
+{
+  "inspectionId": "INSP-VAH-2031",
+  "vehicle": {
+    "plate": "MH12AB9087",
+    "model": "Hyundai i20",
+    "vin": "MA3EHKD17A1234567",
+    "type": "4W",
+    "inspectedAt": "2026-04-16T13:10:00Z"
+  },
+  "healthScore": 63,
+  "triageCategory": "STRUCTURAL/FUNCTIONAL",
+  "processedImageUrl": "uploads/sample_detected.jpg",
+  "findings": [
+    {
+      "id": "DMG-1",
+      "type": "dent",
+      "severity": "high",
+      "confidence": 0.93,
+      "category": "Functional",
+      "estimateMin": 8500,
+      "estimateMax": 14000,
+      "explainability": "Panel deformation pattern and edge contour mismatch indicate a medium-to-high impact dent.",
+      "box": [40, 80, 210, 220]
+    },
+    {
+      "id": "DMG-2",
+      "type": "scratch",
+      "severity": "medium",
+      "confidence": 0.88,
+      "category": "Cosmetic",
+      "estimateMin": 2500,
+      "estimateMax": 4900,
+      "explainability": "Linear reflective discontinuity with paint-layer disruption resembles surface scratch clusters.",
+      "box": [250, 120, 390, 195]
+    }
+  ]
+}

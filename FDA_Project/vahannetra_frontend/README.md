@@ -1,36 +1,151 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Vahannetra AI Frontend
 
-## Getting Started
+Premium, mobile-first UI for AI vehicle damage detection workflows.
 
-First, run the development server:
+## Tech Stack
+- Next.js (App Router) + TypeScript
+- Tailwind CSS
+- React Query + Zustand
+- React Hook Form + Zod
+- Recharts
+- Framer Motion
+- shadcn-style reusable UI components
 
+## Run
 ```bash
+cd /home/runner/work/vehicle-assessment---Vahannetra/vehicle-assessment---Vahannetra/FDA_Project/vahannetra_frontend
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Set env (optional):
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_USE_BACKEND=true
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `NEXT_PUBLIC_USE_BACKEND=true` enables real API call to `POST /assess-damage/`
+- otherwise mock API data is used for prototype flow
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Information Architecture
+- Auth
+  - `/login`
+- Workspace
+  - `/dashboard`
+  - `/inspection/new`
+  - `/inspection/processing`
+  - `/inspection/result`
+  - `/history`
+  - `/history/[id]`
+  - `/analytics`
+  - `/settings`
 
-## Learn More
+## User Flow (textual)
+1. Login
+2. Dashboard summary
+3. Start inspection
+4. Select vehicle type + details
+5. Select angle coverage
+6. Capture/upload image (camera/gallery/drag-drop)
+7. AI processing stages (preprocess → detect → classify → severity)
+8. Result report (annotated image, heatmap, confidence, cost, explainability)
+9. Send to claim / download report
+10. Review in history + analytics
 
-To learn more about Next.js, take a look at the following resources:
+## Component Hierarchy (high-level)
+- `AppProviders`
+  - `ThemeProvider`
+  - `QueryClientProvider`
+- `AppShell`
+  - Sidebar + Mobile bottom nav
+  - Screen pages
+- Shared UI
+  - `Button`, `Card`, `Input`, `Badge`, `Switch`, `Progress`, `Skeleton`
+- Feature Components
+  - `InspectionStepper`, `PhotoUpload`
+  - `AnnotatedImageViewer`, `DamageCard`, `ConfidenceMeter`, `CostEstimateWidget`
+  - `EmptyState`, `ErrorState`, `StatCard`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Frontend Folder Structure
+```txt
+src/
+  app/
+    login/
+    (workspace)/
+      dashboard/
+      inspection/new/
+      inspection/processing/
+      inspection/result/
+      history/
+      history/[id]/
+      analytics/
+      settings/
+  components/
+    providers/
+    layout/
+    ui/
+    states/
+    inspection/
+    results/
+    dashboard/
+  lib/
+    api/
+      mock-responses/ai-results.json
+    design-tokens.ts
+    utils.ts
+  store/
+    inspection-store.ts
+  types/
+    domain.ts
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Reusable Components + Core Props
+- `Button({ variant, size, ...props })`
+- `Card({ className, ...props })`
+- `Input({ ...props })`
+- `Badge({ className, ...props })`
+- `Progress({ value })`
+- `Switch({ checked, onCheckedChange, label })`
+- `InspectionStepper({ steps, activeStep })`
+- `PhotoUpload({ file, onFileChange })`
+- `AnnotatedImageViewer({ imageUrl, findings, heatmapEnabled })`
+- `DamageCard({ finding })`
+- `ConfidenceMeter({ confidence })`
+- `CostEstimateWidget({ min, max })`
+- `EmptyState({ title, description })`
+- `ErrorState({ message, onRetry })`
 
-## Deploy on Vercel
+## Backend Integration Status
+### Already available in backend
+- ✅ `POST /assess-damage/` (used in processing flow)
+- ✅ `GET /view-result/{filename}` (processed image access)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Missing backend modules (you can build)
+- ❌ Auth endpoints
+  - Build: `/auth/login`, `/auth/forgot-password`, `/auth/verify-otp`
+  - Return JWT + refresh token + org-scoped user profile
+- ❌ Dashboard overview
+  - Build: `/dashboard/overview`
+  - Return fleet score, recent inspections, attention list
+- ❌ History + report endpoints
+  - Build: `/inspections` (filters: vehicle/date/severity/status)
+  - Build: `/inspections/{id}` + `/inspections/{id}/report.pdf`
+- ❌ Analytics
+  - Build: `/analytics/damage-distribution`
+  - Build: `/analytics/severity-trends`
+  - Build: `/analytics/vehicle-risk-ranking`
+- ❌ Settings/Profile
+  - Build: `/settings` GET/PATCH for org + notifications + theme
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Mock Responses
+- Sample AI result JSON: `src/lib/api/mock-responses/ai-results.json`
+
+## Production Polish Checklist
+- [ ] Replace mock services with real endpoints
+- [ ] Add auth token handling + refresh flow
+- [ ] Add robust image quality checks (blur/brightness using CV pipeline)
+- [ ] Add report PDF generation integration
+- [ ] Add i18n + full accessibility audit (WCAG AA)
+- [ ] Add telemetry + error monitoring (Sentry)
+- [ ] Add E2E tests for inspection wizard and result report
+- [ ] Harden security headers + CSP and upload validation
