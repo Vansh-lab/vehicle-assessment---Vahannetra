@@ -14,10 +14,13 @@ import { AnnotatedImageViewer } from "@/components/results/annotated-image-viewe
 import { DamageCard } from "@/components/results/damage-card";
 import { ConfidenceMeter } from "@/components/results/confidence-meter";
 import { CostEstimateWidget } from "@/components/results/cost-estimate-widget";
+import { useConfirm } from "@/components/providers/confirm-provider";
 
 export default function ResultPage() {
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
   const [claimMessage, setClaimMessage] = useState("");
+  const { confirm } = useConfirm();
+  const bypassConfirm = process.env.NEXT_PUBLIC_E2E_BYPASS_CONFIRM === "true";
   const { latestResult } = useInspectionStore();
   const result = latestResult ?? mockInspectionResult;
 
@@ -119,10 +122,34 @@ export default function ResultPage() {
       </Card>
 
       <div className="sticky bottom-16 grid gap-2 md:bottom-4 md:grid-cols-2">
-        <Button variant="secondary" onClick={() => claimMutation.mutate()} disabled={claimMutation.isPending}>
+        <Button
+          variant="secondary"
+          onClick={async () => {
+            const accepted = bypassConfirm
+              ? true
+              : await confirm({
+                  title: "Submit insurance claim",
+                  message: "This action will submit the selected inspection to the external claims destination.",
+                });
+            if (accepted) claimMutation.mutate();
+          }}
+          disabled={claimMutation.isPending}
+        >
           <FileUp size={16} className="mr-2" /> {claimMutation.isPending ? "Submitting claim..." : "Send to claim system"}
         </Button>
-        <Button className="w-full" onClick={() => downloadMutation.mutate()} disabled={downloadMutation.isPending}>
+        <Button
+          className="w-full"
+          onClick={async () => {
+            const accepted = bypassConfirm
+              ? true
+              : await confirm({
+                  title: "Download inspection report",
+                  message: "A signed report PDF will be generated/downloaded for this inspection.",
+                });
+            if (accepted) downloadMutation.mutate();
+          }}
+          disabled={downloadMutation.isPending}
+        >
           <Download size={16} className="mr-2" /> {downloadMutation.isPending ? "Preparing report..." : "Download report"}
         </Button>
       </div>

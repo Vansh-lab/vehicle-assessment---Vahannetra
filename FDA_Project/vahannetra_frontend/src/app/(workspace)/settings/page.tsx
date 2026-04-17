@@ -9,12 +9,14 @@ import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { useI18n } from "@/components/providers/i18n-provider";
 
 type PrefKey = "push" | "email" | "critical_only";
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const { theme, toggleTheme, setTheme } = useTheme();
+  const { locale, setLocale, t } = useI18n();
   const { data, isLoading } = useQuery({ queryKey: ["settings"], queryFn: getSettings });
 
   const mutation = useMutation({
@@ -88,6 +90,21 @@ export default function SettingsPage() {
         >
           {theme === "dark" ? <Sun size={16} /> : <MoonStar size={16} />} {theme === "dark" ? "Light" : "Dark"}
         </button>
+      </Card>
+
+      <Card className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-slate-100">{t("locale.label", "Language")}</p>
+          <p className="text-xs text-slate-400">UI localization preference</p>
+        </div>
+        <select
+          className="rounded-xl border border-white/15 bg-slate-950/70 px-3 py-2 text-sm text-slate-100"
+          value={locale}
+          onChange={(event) => setLocale(event.target.value === "hi" ? "hi" : "en")}
+        >
+          <option value="en">{t("locale.english", "English")}</option>
+          <option value="hi">{t("locale.hindi", "Hindi")}</option>
+        </select>
       </Card>
 
       <Card>

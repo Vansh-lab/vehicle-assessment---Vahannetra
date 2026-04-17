@@ -5,13 +5,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { ShieldCheck, Smartphone } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { loginWithBackend } from "@/lib/api/services";
+import { loginWithBackend, requestPasswordOtp, verifyPasswordOtp } from "@/lib/api/services";
 import { isSessionActive, setSessionFromAuth } from "@/lib/auth/session";
 
 const schema = z.object({
@@ -26,6 +25,11 @@ export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotOtp, setForgotOtp] = useState("");
+  const [forgotMessage, setForgotMessage] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   const {
     register,
@@ -53,6 +57,32 @@ export default function LoginPage() {
       setError(submitError instanceof Error ? submitError.message : "Login failed");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const sendForgotOtp = async () => {
+    try {
+      setForgotLoading(true);
+      setForgotMessage("");
+      const response = await requestPasswordOtp(forgotEmail);
+      setForgotMessage(response.message);
+    } catch (forgotError) {
+      setForgotMessage(forgotError instanceof Error ? forgotError.message : "Failed to send OTP");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const verifyForgotOtp = async () => {
+    try {
+      setForgotLoading(true);
+      setForgotMessage("");
+      await verifyPasswordOtp(forgotEmail, forgotOtp);
+      setForgotMessage("OTP verified. You can now continue standard login.");
+    } catch (forgotError) {
+      setForgotMessage(forgotError instanceof Error ? forgotError.message : "OTP verification failed");
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -90,11 +120,58 @@ export default function LoginPage() {
         </form>
 
         <div className="flex items-center justify-between text-xs text-slate-400">
-          <Link href="#" className="hover:text-cyan-100">
-            Forgot password?
-          </Link>
+          <button type="button" onClick={() => setForgotOpen((prev) => !prev)} className="hover:text-cyan-100">
+            {forgotOpen ? "Back to login" : "Forgot password?"}
+          </button>
           <span>SSO ready</span>
         </div>
+
+        {forgotOpen ? (
+          <Card className="space-y-3 border-amber-300/20 p-4">
+            <p className="text-sm font-semibold text-slate-100">Password recovery (OTP)</p>
+            <div>
+              <Label htmlFor="forgot-email">Work Email</Label>
+              <Input
+                id="forgot-email"
+                type="email"
+                placeholder="ops@insurer.com"
+                value={forgotEmail}
+                onChange={(event) => setForgotEmail(event.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="forgot-otp">OTP</Label>
+              <Input
+                id="forgot-otp"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                autoComplete="one-time-code"
+                placeholder="123456"
+                value={forgotOtp}
+                onChange={(event) => setForgotOtp(event.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void sendForgotOtp()}
+                disabled={!forgotEmail || forgotLoading}
+              >
+                Send OTP
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void verifyForgotOtp()}
+                disabled={!forgotEmail || !forgotOtp || forgotLoading}
+              >
+                Verify OTP
+              </Button>
+            </div>
+            {forgotMessage ? <p className="text-xs text-slate-300">{forgotMessage}</p> : null}
+          </Card>
+        ) : null}
       </Card>
     </div>
   );

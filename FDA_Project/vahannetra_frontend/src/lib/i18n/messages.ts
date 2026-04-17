@@ -1,0 +1,36 @@
+export type Locale = "en" | "hi";
+
+export const messages: Record<Locale, Record<string, string>> = {
+  en: {
+    "nav.dashboard": "Dashboard",
+    "nav.inspect": "Inspect",
+    "nav.history": "History",
+    "nav.analytics": "Analytics",
+    "nav.settings": "Settings",
+    "app.tagline": "Vehicle Damage Intelligence",
+    "common.continue": "Continue",
+    "common.cancel": "Cancel",
+    "common.confirm": "Confirm",
+    "locale.label": "Language",
+    "locale.english": "English",
+    "locale.hindi": "Hindi",
+    "confirm.title": "Please confirm",
+    "confirm.message": "Are you sure you want to continue?",
+  },
+  hi: {
+    "nav.dashboard": "डैशबोर्ड",
+    "nav.inspect": "इंस्पेक्ट",
+    "nav.history": "हिस्ट्री",
+    "nav.analytics": "एनालिटिक्स",
+    "nav.settings": "सेटिंग्स",
+    "app.tagline": "वाहन डैमेज इंटेलिजेंस",
+    "common.continue": "जारी रखें",
+    "common.cancel": "रद्द करें",
+    "common.confirm": "पुष्टि करें",
+    "locale.label": "भाषा",
+    "locale.english": "अंग्रेज़ी",
+    "locale.hindi": "हिंदी",
+    "confirm.title": "कृपया पुष्टि करें",
+    "confirm.message": "क्या आप आगे बढ़ना चाहते हैं?",
+  },
+};

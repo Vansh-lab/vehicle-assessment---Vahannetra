@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -53,6 +53,26 @@ class OtpCode(Base):
     used: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class OtpDeliveryEvent(Base):
+    __tablename__ = "otp_delivery_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    provider: Mapped[str] = mapped_column(String(80), default="console")
+    provider_message_id: Mapped[str] = mapped_column(String(200), index=True, default="")
+    status: Mapped[str] = mapped_column(String(40), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str] = mapped_column(String(500), default="")
+    callback_payload: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 class Inspection(Base):
     __tablename__ = "inspections"
 
@@ -62,7 +82,7 @@ class Inspection(Base):
     model: Mapped[str] = mapped_column(String(120), index=True)
     vin: Mapped[str | None] = mapped_column(String(64), nullable=True)
     vehicle_type: Mapped[str] = mapped_column(String(32), default="4W")
-    date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
     severity: Mapped[str] = mapped_column(String(16), default="low")
     status: Mapped[str] = mapped_column(String(20), default="Completed")
     risk_score: Mapped[int] = mapped_column(Integer, default=0)
@@ -95,4 +115,18 @@ class Claim(Base):
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     status: Mapped[str] = mapped_column(String(30), default="Submitted")
     provider_ref: Mapped[str] = mapped_column(String(120), default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class ClientErrorEvent(Base):
+    __tablename__ = "client_error_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    level: Mapped[str] = mapped_column(String(20), default="error")
+    message: Mapped[str] = mapped_column(String(1000), default="")
+    source: Mapped[str] = mapped_column(String(255), default="")
+    stack: Mapped[str] = mapped_column(Text, default="")
+    route: Mapped[str] = mapped_column(String(255), default="")
+    user_agent: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)

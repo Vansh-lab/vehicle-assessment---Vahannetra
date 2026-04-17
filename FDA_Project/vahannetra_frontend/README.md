@@ -136,10 +136,11 @@ src/
 - ✅ `POST /claims/submit`
 
 ### Still missing for full production backend
-- ❌ External managed OTP provider (Twilio/SendGrid/etc.) with delivery callbacks and retry telemetry
-- ❌ Multi-tenant hardening beyond org claim checks (e.g., row-level policy at DB layer)
-- ❌ Full timezone-aware datetime migration (`datetime.utcnow` deprecation cleanup)
-- ❌ Secret management via vault/KMS (currently env-based secret)
+- ✅ OTP delivery retry telemetry persisted with callback endpoint support (`POST /auth/otp/delivery-callback`)
+- ✅ Multi-tenant DB hardening hooks for PostgreSQL RLS policy setup + org session context (SQLite-safe fallback)
+- ✅ Full timezone-aware datetime migration (`datetime.utcnow` deprecation cleanup)
+- ✅ FastAPI startup lifecycle migrated from `on_event` to lifespan
+- ✅ Secret manager abstraction with env/file/Vault lookup fallback
 
 ## Mock Responses
 - Sample AI result JSON: `src/lib/api/mock-responses/ai-results.json`
@@ -149,7 +150,7 @@ src/
 - [x] Add auth token handling + refresh flow
 - [x] Add robust image quality checks (blur/brightness using CV pipeline)
 - [x] Add report PDF generation integration
-- [ ] Add i18n + full accessibility audit (WCAG AA)
-- [ ] Add telemetry + error monitoring (Sentry)
-- [ ] Add E2E tests for inspection wizard and result report
-- [ ] Harden security headers + CSP and upload validation
+- [x] Add i18n foundation + accessibility improvements (language selector + skip link)
+- [x] Add telemetry + client error monitoring endpoint wiring
+- [x] Add E2E tests for inspection wizard and result report flow
+- [x] Harden security headers + CSP and upload validation

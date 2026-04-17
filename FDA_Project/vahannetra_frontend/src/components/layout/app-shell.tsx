@@ -5,23 +5,37 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BarChart3, ClipboardList, Home, Settings, UserCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/components/providers/i18n-provider";
 
 const links = [
-  { href: "/dashboard", label: "Dashboard", icon: Home },
-  { href: "/inspection/new", label: "Inspect", icon: ClipboardList },
-  { href: "/history", label: "History", icon: UserCircle2 },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard", labelKey: "nav.dashboard", icon: Home },
+  { href: "/inspection/new", labelKey: "nav.inspect", icon: ClipboardList },
+  { href: "/history", labelKey: "nav.history", icon: UserCircle2 },
+  { href: "/analytics", labelKey: "nav.analytics", icon: BarChart3 },
+  { href: "/settings", labelKey: "nav.settings", icon: Settings },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { locale, setLocale, t } = useI18n();
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-7xl gap-4 px-4 pb-24 pt-4 md:px-6 md:pb-8">
       <aside className="hidden w-56 shrink-0 rounded-2xl border border-white/10 bg-slate-900/70 p-4 md:block">
         <p className="text-lg font-bold text-cyan-200">Vahannetra AI</p>
-        <p className="mt-1 text-xs text-slate-400">Vehicle Damage Intelligence</p>
+        <p className="mt-1 text-xs text-slate-400">{t("app.tagline", "Vehicle Damage Intelligence")}</p>
+        <label className="mt-4 block text-xs text-slate-400" htmlFor="locale-selector">
+          {t("locale.label", "Language")}
+        </label>
+        <select
+          id="locale-selector"
+          className="mt-1 w-full rounded-lg border border-white/20 bg-slate-950/70 px-2 py-1 text-xs text-slate-200"
+          value={locale}
+          onChange={(event) => setLocale(event.target.value === "hi" ? "hi" : "en")}
+        >
+          <option value="en">{t("locale.english", "English")}</option>
+          <option value="hi">{t("locale.hindi", "Hindi")}</option>
+        </select>
         <nav className="mt-6 space-y-1">
           {links.map((link) => {
             const Icon = link.icon;
@@ -36,13 +50,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 )}
               >
                 <Icon size={16} />
-                {link.label}
+                {t(link.labelKey)}
               </Link>
             );
           })}
         </nav>
       </aside>
-      <main className="flex-1">{children}</main>
+      <main id="main-content" className="flex-1">{children}</main>
       <nav className="fixed inset-x-3 bottom-3 z-20 grid grid-cols-5 rounded-2xl border border-white/15 bg-slate-900/90 p-2 backdrop-blur md:hidden">
         {links.map((link) => {
           const Icon = link.icon;
@@ -57,7 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
             >
               <Icon size={16} />
-              {link.label}
+              {t(link.labelKey)}
             </Link>
           );
         })}

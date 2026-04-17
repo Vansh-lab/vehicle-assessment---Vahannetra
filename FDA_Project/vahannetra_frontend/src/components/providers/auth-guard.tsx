@@ -7,14 +7,19 @@ import { isSessionActive } from "@/lib/auth/session";
 import { Card } from "@/components/ui/card";
 
 export function AuthGuard({ children }: { children: ReactNode }) {
+  const bypassAuth = process.env.NEXT_PUBLIC_E2E_BYPASS_AUTH === "true";
   const router = useRouter();
   const active = isSessionActive();
 
   useEffect(() => {
-    if (!active) {
+    if (!bypassAuth && !active) {
       router.replace("/login");
     }
-  }, [active, router]);
+  }, [active, bypassAuth, router]);
+
+  if (bypassAuth) {
+    return <>{children}</>;
+  }
 
   if (!active) {
     return (

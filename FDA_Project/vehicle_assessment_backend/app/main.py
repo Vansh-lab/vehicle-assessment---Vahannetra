@@ -1,13 +1,17 @@
 import json
+import hmac
 import os
 import random
+import re
 import uuid
-from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
 import cv2
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+import numpy as np
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
@@ -23,14 +27,24 @@ from app.auth import (
     require_roles,
     verify_password,
 )
-from app.database import Base, engine, get_db
-from app.db_models import Claim, Inspection, Organization, OtpCode, RefreshToken, Setting, User
+from app.database import Base, apply_rls_policies, engine, get_db
+from app.db_models import (
+    Claim,
+    ClientErrorEvent,
+    Inspection,
+    Organization,
+    OtpCode,
+    OtpDeliveryEvent,
+    RefreshToken,
+    Setting,
+    User,
+)
 from app.otp_provider import get_otp_provider
 from app.pdf_reports import render_inspection_report
+from app.secrets import get_secret
 from app.services.detector import DamageDetector
 from app.utils.assessment import calculate_dsi
 
-app = FastAPI(title="AI Vehicle Assessment Backend")
 detector = DamageDetector()
 otp_provider = get_otp_provider()
 
@@ -38,18 +52,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 SeverityLevel = Literal["low", "medium", "high"]
 InspectionStatus = Literal["Completed", "Pending", "Failed"]
 Theme = Literal["dark", "light"]
 UserRole = Literal["admin", "manager", "inspector"]
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def ensure_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def isoformat_utc_z(value: datetime) -> str:
+    return ensure_utc(value).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class AuthLoginRequest(BaseModel):
@@ -163,6 +181,22 @@ class ClaimSubmitResponse(BaseModel):
     provider_reference: str
 
 
+class OtpDeliveryCallback(BaseModel):
+    provider_message_id: str
+    status: Literal["queued", "sent", "delivered", "failed", "bounced"]
+    error_message: str | None = None
+    payload: dict | None = None
+
+
+class ClientErrorPayload(BaseModel):
+    level: Literal["error", "warning"] = "error"
+    message: str
+    source: str | None = None
+    stack: str | None = None
+    route: str | None = None
+    user_agent: str | None = None
+
+
 class AuthResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -202,11 +236,34 @@ def finding_from_detection(index: int, det: dict, severity: SeverityLevel, triag
     )
 
 
+def validate_upload(file: UploadFile, payload: bytes) -> None:
+    max_size_bytes = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(8 * 1024 * 1024)))
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(payload) > max_size_bytes:
+        raise HTTPException(status_code=413, detail="File too large")
+
+    allowed_types = {"image/jpeg", "image/png", "image/webp"}
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail="Only JPEG, PNG and WEBP files are allowed")
+
+    header = payload[:12]
+    is_jpeg = header.startswith(b"\xff\xd8\xff")
+    is_png = header.startswith(b"\x89PNG\r\n\x1a\n")
+    is_webp = len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP"
+    if not (is_jpeg or is_png or is_webp):
+        raise HTTPException(status_code=400, detail="Invalid image signature")
+
+    decoded = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if decoded is None:
+        raise HTTPException(status_code=400, detail="Corrupt or unsupported image payload")
+
+
 def issue_token_bundle(db: Session, user: User, organization: Organization) -> AuthResponse:
     return AuthResponse(
         access_token=create_access_token(user),
         refresh_token=create_refresh_token(db, user),
-        issued_at=datetime.utcnow().isoformat() + "Z",
+        issued_at=isoformat_utc_z(utc_now()),
         user={
             "id": user.id,
             "name": user.name,
@@ -226,7 +283,7 @@ def to_history_item(record: Inspection) -> InspectionHistoryItem:
         id=record.id,
         plate=record.plate,
         model=record.model,
-        date=record.date.isoformat() + "Z",
+        date=isoformat_utc_z(record.date),
         severity=record.severity,
         status=record.status,
         risk_score=record.risk_score,
@@ -243,7 +300,7 @@ def to_inspection_detail(record: Inspection) -> InspectionDetail:
             model=record.model,
             vin=record.vin,
             type=record.vehicle_type,
-            inspected_at=record.date.isoformat() + "Z",
+            inspected_at=isoformat_utc_z(record.date),
         ),
         health_score=record.health_score,
         triage_category=record.triage_category,
@@ -254,6 +311,7 @@ def to_inspection_detail(record: Inspection) -> InspectionDetail:
 
 def init_seed_data() -> None:
     Base.metadata.create_all(bind=engine)
+    apply_rls_policies()
     db = next(get_db())
     try:
         if db.query(Organization).count() > 0:
@@ -278,7 +336,7 @@ def init_seed_data() -> None:
                 model="Hyundai i20",
                 vin="MA3EHKD17A1234567",
                 vehicle_type="4W",
-                date=datetime.utcnow() - timedelta(hours=8),
+                date=utc_now() - timedelta(hours=8),
                 severity="medium",
                 status="Completed",
                 risk_score=58,
@@ -318,7 +376,7 @@ def init_seed_data() -> None:
                 plate="DL3CB7781",
                 model="Honda Activa",
                 vehicle_type="Scooter",
-                date=datetime.utcnow() - timedelta(hours=6),
+                date=utc_now() - timedelta(hours=6),
                 severity="low",
                 status="Completed",
                 risk_score=31,
@@ -333,7 +391,7 @@ def init_seed_data() -> None:
                 plate="KA05MN2211",
                 model="Tata Nexon",
                 vehicle_type="4W",
-                date=datetime.utcnow() - timedelta(hours=4),
+                date=utc_now() - timedelta(hours=4),
                 severity="high",
                 status="Completed",
                 risk_score=84,
@@ -354,9 +412,34 @@ def init_seed_data() -> None:
         db.close()
 
 
-@app.on_event("startup")
-def on_startup() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI):
     init_seed_data()
+    yield
+
+
+app = FastAPI(title="AI Vehicle Assessment Backend", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers[
+        "Content-Security-Policy"
+    ] = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none';"
+    return response
 
 
 @app.get("/")
@@ -408,13 +491,24 @@ async def auth_forgot_password(payload: ForgotPasswordRequest, db: Session = Dep
             email=user.email,
             code_hash=hash_secret(otp_code),
             purpose="forgot_password",
-            expires_at=datetime.utcnow() + timedelta(minutes=10),
+            expires_at=utc_now() + timedelta(minutes=10),
             used=False,
         )
     )
     db.commit()
 
-    otp_provider.send_otp(user.email, otp_code)
+    delivery_event = OtpDeliveryEvent(email=user.email, organization_id=user.organization_id, status="pending")
+    db.add(delivery_event)
+    db.commit()
+    db.refresh(delivery_event)
+
+    send_result = otp_provider.send_otp(user.email, otp_code)
+    delivery_event.provider = send_result.provider
+    delivery_event.provider_message_id = send_result.provider_message_id
+    delivery_event.status = send_result.status
+    delivery_event.attempts = send_result.attempts
+    delivery_event.error_message = send_result.error_message
+    db.commit()
     return {"message": f"OTP sent to {user.email}", "otp_required": True, "channel": "email"}
 
 
@@ -430,7 +524,7 @@ async def auth_verify_otp(payload: VerifyOtpRequest, db: Session = Depends(get_d
         .order_by(OtpCode.id.desc())
         .first()
     )
-    if not otp_record or otp_record.expires_at < datetime.utcnow() or otp_record.code_hash != hash_secret(payload.otp):
+    if not otp_record or ensure_utc(otp_record.expires_at) < utc_now() or otp_record.code_hash != hash_secret(payload.otp):
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
     otp_record.used = True
@@ -441,6 +535,33 @@ async def auth_verify_otp(payload: VerifyOtpRequest, db: Session = Depends(get_d
         raise HTTPException(status_code=500, detail="Organization not found")
 
     return issue_token_bundle(db, user, organization)
+
+
+@app.post("/auth/otp/delivery-callback")
+async def auth_otp_delivery_callback(
+    payload: OtpDeliveryCallback,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    callback_secret = get_secret("OTP_CALLBACK_SECRET", "dev-callback-secret")
+    provided = request.headers.get("X-Callback-Secret")
+    if not provided or not hmac.compare_digest(provided, callback_secret):
+        raise HTTPException(status_code=401, detail="Invalid callback secret")
+
+    event = (
+        db.query(OtpDeliveryEvent)
+        .filter(OtpDeliveryEvent.provider_message_id == payload.provider_message_id)
+        .order_by(OtpDeliveryEvent.id.desc())
+        .first()
+    )
+    if not event:
+        raise HTTPException(status_code=404, detail="Delivery event not found")
+
+    event.status = payload.status
+    event.error_message = payload.error_message or ""
+    event.callback_payload = json.dumps(payload.payload or {})
+    db.commit()
+    return {"ok": True}
 
 
 @app.get("/dashboard/overview", response_model=DashboardOverviewResponse)
@@ -461,7 +582,7 @@ async def dashboard_overview(
     health = FleetHealth(
         score=avg_health,
         attention_vehicles=len(attention),
-        inspections_today=len([item for item in all_items if item.date.date() == datetime.utcnow().date()]),
+        inspections_today=len([item for item in all_items if item.date.date() == utc_now().date()]),
         active_alerts=len([item for item in all_items if item.severity == "high"]),
     )
 
@@ -478,10 +599,15 @@ async def assess_damage(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    safe_name = f"{uuid.uuid4().hex}_{file.filename}"
+    payload = await file.read()
+    validate_upload(file, payload)
+
+    base_name = Path(file.filename or "upload").name
+    sanitized_name = re.sub(r"[^A-Za-z0-9._-]", "_", base_name)
+    safe_name = f"{uuid.uuid4().hex}_{sanitized_name}"
     file_path = UPLOAD_DIR / safe_name
     with open(file_path, "wb") as output_file:
-        output_file.write(await file.read())
+        output_file.write(payload)
 
     raw_detections, processed_img_path = detector.analyze_vehicle(str(file_path))
 
@@ -495,7 +621,7 @@ async def assess_damage(
         for index, det in enumerate(raw_detections)
     ]
 
-    inspection_id = f"INSP-{int(datetime.utcnow().timestamp())}-{uuid.uuid4().hex[:6]}"
+    inspection_id = f"INSP-{int(utc_now().timestamp())}-{uuid.uuid4().hex[:6]}"
     inspection = Inspection(
         id=inspection_id,
         organization_id=current_user.organization_id,
@@ -503,7 +629,7 @@ async def assess_damage(
         model="Unknown",
         vin=None,
         vehicle_type="4W",
-        date=datetime.utcnow(),
+        date=utc_now(),
         severity=severity,
         status="Completed",
         risk_score=min(100, int(dsi_score)),
@@ -530,21 +656,20 @@ async def assess_damage(
 @app.get("/view-result/{filename}")
 async def get_result_image(filename: str, current_user: User = Depends(get_current_user)):
     _ = current_user
-    base_dir = UPLOAD_DIR.resolve()
-
-    requested_name = Path(filename)
-    if requested_name.name != filename or filename in {"", ".", ".."}:
+    if not filename or "/" in filename or "\\" in filename or filename in {".", ".."}:
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = (base_dir / requested_name.name).resolve()
+    file_path = next(
+        (
+            candidate
+            for candidate in UPLOAD_DIR.iterdir()
+            if candidate.is_file() and candidate.name == filename
+        ),
+        None,
+    )
 
-    try:
-        file_path.relative_to(base_dir)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    if file_path.exists() and file_path.is_file():
-        return FileResponse(file_path)
+    if file_path:
+        return FileResponse(file_path.resolve())
     raise HTTPException(status_code=404, detail="File not found")
 
 
@@ -759,3 +884,23 @@ async def patch_settings(
         notifications=NotificationPreferences(push=setting.push, email=setting.email, critical_only=setting.critical_only),
         theme=setting.theme,
     )
+
+
+@app.post("/telemetry/client-error")
+async def record_client_error(
+    payload: ClientErrorPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    event = ClientErrorEvent(
+        organization_id=current_user.organization_id,
+        level=payload.level,
+        message=payload.message[:1000],
+        source=(payload.source or "")[:255],
+        stack=(payload.stack or "")[:10000],
+        route=(payload.route or "")[:255],
+        user_agent=(payload.user_agent or "")[:500],
+    )
+    db.add(event)
+    db.commit()
+    return {"ok": True}
