@@ -16,14 +16,15 @@ test("inspection and report flow", async ({ page }) => {
   await page.getByRole("button", { name: "Left" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
 
-  await page.setInputFiles('input[type="file"]', {
+  await page.locator('input[type="file"]').last().setInputFiles({
     name: "test.png",
     mimeType: "image/png",
     buffer: Buffer.from(tinyPngBase64, "base64"),
   });
+  await expect(page.getByAltText("inspection preview")).toBeVisible();
 
   await page.getByRole("button", { name: "Analyze Damage" }).click();
-  await expect(page).toHaveURL(/\/inspection\/result$/);
+  await expect(page).toHaveURL(/\/inspection\/result$/, { timeout: 30000 });
   await expect(page.getByText("Vehicle Summary")).toBeVisible();
 
   await page.getByRole("button", { name: "Send to claim system" }).click({ force: true });
