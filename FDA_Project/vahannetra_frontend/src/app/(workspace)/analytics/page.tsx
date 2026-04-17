@@ -11,6 +11,10 @@ import { ErrorState } from "@/components/states/error-state";
 const pieColors = ["#00e5ff", "#35d48d", "#ffb648", "#ff5a7a", "#9f7aea"];
 const chartHeight = 256;
 
+function hasSameSize(a: { width: number; height: number }, b: { width: number; height: number }) {
+  return a.width === b.width && a.height === b.height;
+}
+
 function ChartCanvas({ children }: { children: (size: { width: number; height: number }) => ReactNode }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -22,17 +26,15 @@ function ChartCanvas({ children }: { children: (size: { width: number; height: n
     const syncSize = () => {
       const nextWidth = element.clientWidth;
       const nextHeight = element.clientHeight;
-      setSize((prev) => (prev.width === nextWidth && prev.height === nextHeight ? prev : { width: nextWidth, height: nextHeight }));
+      setSize((prev) => (hasSameSize(prev, { width: nextWidth, height: nextHeight }) ? prev : { width: nextWidth, height: nextHeight }));
     };
 
     syncSize();
     const observer = new ResizeObserver(syncSize);
     observer.observe(element);
-    window.addEventListener("resize", syncSize);
 
     return () => {
       observer.disconnect();
-      window.removeEventListener("resize", syncSize);
     };
   }, []);
 

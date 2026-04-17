@@ -28,7 +28,7 @@ function extractProcessedFilename(processedImagePath: string): string | null {
   if (!value) return null;
   const parts = value.split("/").filter(Boolean);
   const filename = parts.at(-1);
-  return filename || null;
+  return filename ?? null;
 }
 
 async function resolveProcessedImageUrl(processedImagePath: string): Promise<string> {
