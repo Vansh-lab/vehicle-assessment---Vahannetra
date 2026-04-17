@@ -20,6 +20,7 @@ export default function ResultPage() {
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
   const [claimMessage, setClaimMessage] = useState("");
   const { confirm } = useConfirm();
+  const bypassConfirm = process.env.NEXT_PUBLIC_E2E_BYPASS_CONFIRM === "true";
   const { latestResult } = useInspectionStore();
   const result = latestResult ?? mockInspectionResult;
 
@@ -124,10 +125,12 @@ export default function ResultPage() {
         <Button
           variant="secondary"
           onClick={async () => {
-            const accepted = await confirm({
-              title: "Submit insurance claim",
-              message: "This action will submit the selected inspection to the external claims destination.",
-            });
+            const accepted = bypassConfirm
+              ? true
+              : await confirm({
+                  title: "Submit insurance claim",
+                  message: "This action will submit the selected inspection to the external claims destination.",
+                });
             if (accepted) claimMutation.mutate();
           }}
           disabled={claimMutation.isPending}
@@ -137,10 +140,12 @@ export default function ResultPage() {
         <Button
           className="w-full"
           onClick={async () => {
-            const accepted = await confirm({
-              title: "Download inspection report",
-              message: "A signed report PDF will be generated/downloaded for this inspection.",
-            });
+            const accepted = bypassConfirm
+              ? true
+              : await confirm({
+                  title: "Download inspection report",
+                  message: "A signed report PDF will be generated/downloaded for this inspection.",
+                });
             if (accepted) downloadMutation.mutate();
           }}
           disabled={downloadMutation.isPending}

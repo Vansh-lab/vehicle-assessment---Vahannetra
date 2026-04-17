@@ -13,14 +13,11 @@ interface I18nContextValue {
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocale] = useState<Locale>("en");
-
-  useEffect(() => {
+  const [locale, setLocale] = useState<Locale>(() => {
+    if (typeof window === "undefined") return "en";
     const stored = window.localStorage.getItem("vahannetra.locale");
-    if (stored === "en" || stored === "hi") {
-      setLocale(stored);
-    }
-  }, []);
+    return stored === "hi" ? "hi" : "en";
+  });
 
   useEffect(() => {
     window.localStorage.setItem("vahannetra.locale", locale);

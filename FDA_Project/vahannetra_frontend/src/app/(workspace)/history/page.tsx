@@ -20,6 +20,7 @@ export default function HistoryPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateFilter, setDateFilter] = useState("");
   const { confirm } = useConfirm();
+  const bypassConfirm = process.env.NEXT_PUBLIC_E2E_BYPASS_CONFIRM === "true";
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["history", search, severityFilter, statusFilter, dateFilter],
@@ -31,10 +32,12 @@ export default function HistoryPage() {
   const handleDownload = async (inspectionId: string, event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const accepted = await confirm({
-      title: "Download report PDF",
-      message: "This will generate and open the signed inspection PDF report.",
-    });
+    const accepted = bypassConfirm
+      ? true
+      : await confirm({
+          title: "Download report PDF",
+          message: "This will generate and open the signed inspection PDF report.",
+        });
     if (!accepted) return;
     const url = await downloadInspectionReport(inspectionId);
     window.open(url, "_blank", "noopener,noreferrer");
