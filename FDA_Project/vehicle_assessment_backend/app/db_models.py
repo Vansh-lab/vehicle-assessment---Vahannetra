@@ -53,6 +53,25 @@ class OtpCode(Base):
     used: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class OtpDeliveryEvent(Base):
+    __tablename__ = "otp_delivery_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    provider: Mapped[str] = mapped_column(String(80), default="console")
+    provider_message_id: Mapped[str] = mapped_column(String(200), index=True, default="")
+    status: Mapped[str] = mapped_column(String(40), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str] = mapped_column(String(500), default="")
+    callback_payload: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 class Inspection(Base):
     __tablename__ = "inspections"
 
@@ -96,3 +115,16 @@ class Claim(Base):
     status: Mapped[str] = mapped_column(String(30), default="Submitted")
     provider_ref: Mapped[str] = mapped_column(String(120), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class ClientErrorEvent(Base):
+    __tablename__ = "client_error_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    level: Mapped[str] = mapped_column(String(20), default="error")
+    message: Mapped[str] = mapped_column(String(1000), default="")
+    source: Mapped[str] = mapped_column(String(255), default="")
+    stack: Mapped[str] = mapped_column(Text, default="")
+    route: Mapped[str] = mapped_column(String(255), default="")
+    user_agent: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)

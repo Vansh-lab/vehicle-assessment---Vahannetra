@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import cv2
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
@@ -24,10 +24,21 @@ from app.auth import (
     require_roles,
     verify_password,
 )
-from app.database import Base, engine, get_db
-from app.db_models import Claim, Inspection, Organization, OtpCode, RefreshToken, Setting, User
+from app.database import Base, apply_rls_policies, engine, get_db
+from app.db_models import (
+    Claim,
+    ClientErrorEvent,
+    Inspection,
+    Organization,
+    OtpCode,
+    OtpDeliveryEvent,
+    RefreshToken,
+    Setting,
+    User,
+)
 from app.otp_provider import get_otp_provider
 from app.pdf_reports import render_inspection_report
+from app.secrets import get_secret
 from app.services.detector import DamageDetector
 from app.utils.assessment import calculate_dsi
 
@@ -167,6 +178,22 @@ class ClaimSubmitResponse(BaseModel):
     provider_reference: str
 
 
+class OtpDeliveryCallback(BaseModel):
+    provider_message_id: str
+    status: Literal["queued", "sent", "delivered", "failed", "bounced"]
+    error_message: str | None = None
+    payload: dict | None = None
+
+
+class ClientErrorPayload(BaseModel):
+    level: Literal["error", "warning"] = "error"
+    message: str
+    source: str | None = None
+    stack: str | None = None
+    route: str | None = None
+    user_agent: str | None = None
+
+
 class AuthResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -204,6 +231,25 @@ def finding_from_detection(index: int, det: dict, severity: SeverityLevel, triag
         explainability=f"Detected {det.get('class', 'damage')} based on contour/texture anomalies.",
         box=[float(x) for x in det.get("box", [0, 0, 0, 0])],
     )
+
+
+def validate_upload(file: UploadFile, payload: bytes) -> None:
+    max_size_bytes = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(8 * 1024 * 1024)))
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(payload) > max_size_bytes:
+        raise HTTPException(status_code=413, detail="File too large")
+
+    allowed_types = {"image/jpeg", "image/png", "image/webp"}
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail="Only JPEG, PNG and WEBP files are allowed")
+
+    header = payload[:12]
+    is_jpeg = header.startswith(b"\xff\xd8\xff")
+    is_png = header.startswith(b"\x89PNG\r\n\x1a\n")
+    is_webp = len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP"
+    if not (is_jpeg or is_png or is_webp):
+        raise HTTPException(status_code=400, detail="Invalid image signature")
 
 
 def issue_token_bundle(db: Session, user: User, organization: Organization) -> AuthResponse:
@@ -258,6 +304,7 @@ def to_inspection_detail(record: Inspection) -> InspectionDetail:
 
 def init_seed_data() -> None:
     Base.metadata.create_all(bind=engine)
+    apply_rls_policies()
     db = next(get_db())
     try:
         if db.query(Organization).count() > 0:
@@ -375,6 +422,19 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers[
+        "Content-Security-Policy"
+    ] = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none';"
+    return response
+
+
 @app.get("/")
 async def root():
     return {"message": "AI Vehicle Assessment API is running", "docs": "/docs"}
@@ -430,7 +490,18 @@ async def auth_forgot_password(payload: ForgotPasswordRequest, db: Session = Dep
     )
     db.commit()
 
-    otp_provider.send_otp(user.email, otp_code)
+    delivery_event = OtpDeliveryEvent(email=user.email, status="pending")
+    db.add(delivery_event)
+    db.commit()
+    db.refresh(delivery_event)
+
+    send_result = otp_provider.send_otp(user.email, otp_code)
+    delivery_event.provider = send_result.provider
+    delivery_event.provider_message_id = send_result.provider_message_id
+    delivery_event.status = send_result.status
+    delivery_event.attempts = send_result.attempts
+    delivery_event.error_message = send_result.error_message
+    db.commit()
     return {"message": f"OTP sent to {user.email}", "otp_required": True, "channel": "email"}
 
 
@@ -457,6 +528,33 @@ async def auth_verify_otp(payload: VerifyOtpRequest, db: Session = Depends(get_d
         raise HTTPException(status_code=500, detail="Organization not found")
 
     return issue_token_bundle(db, user, organization)
+
+
+@app.post("/auth/otp/delivery-callback")
+async def auth_otp_delivery_callback(
+    payload: OtpDeliveryCallback,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    callback_secret = get_secret("OTP_CALLBACK_SECRET", "dev-callback-secret")
+    provided = request.headers.get("X-Callback-Secret")
+    if provided != callback_secret:
+        raise HTTPException(status_code=401, detail="Invalid callback secret")
+
+    event = (
+        db.query(OtpDeliveryEvent)
+        .filter(OtpDeliveryEvent.provider_message_id == payload.provider_message_id)
+        .order_by(OtpDeliveryEvent.id.desc())
+        .first()
+    )
+    if not event:
+        raise HTTPException(status_code=404, detail="Delivery event not found")
+
+    event.status = payload.status
+    event.error_message = payload.error_message or ""
+    event.callback_payload = json.dumps(payload.payload or {})
+    db.commit()
+    return {"ok": True}
 
 
 @app.get("/dashboard/overview", response_model=DashboardOverviewResponse)
@@ -494,10 +592,14 @@ async def assess_damage(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    safe_name = f"{uuid.uuid4().hex}_{file.filename}"
+    payload = await file.read()
+    validate_upload(file, payload)
+
+    sanitized_name = Path(file.filename or "upload").name.replace(" ", "_")
+    safe_name = f"{uuid.uuid4().hex}_{sanitized_name}"
     file_path = UPLOAD_DIR / safe_name
     with open(file_path, "wb") as output_file:
-        output_file.write(await file.read())
+        output_file.write(payload)
 
     raw_detections, processed_img_path = detector.analyze_vehicle(str(file_path))
 
@@ -774,3 +876,18 @@ async def patch_settings(
         notifications=NotificationPreferences(push=setting.push, email=setting.email, critical_only=setting.critical_only),
         theme=setting.theme,
     )
+
+
+@app.post("/telemetry/client-error")
+async def record_client_error(payload: ClientErrorPayload, db: Session = Depends(get_db)):
+    event = ClientErrorEvent(
+        level=payload.level,
+        message=payload.message[:1000],
+        source=(payload.source or "")[:255],
+        stack=(payload.stack or "")[:10000],
+        route=(payload.route or "")[:255],
+        user_agent=(payload.user_agent or "")[:500],
+    )
+    db.add(event)
+    db.commit()
+    return {"ok": True}

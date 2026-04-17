@@ -10,10 +10,11 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_db, set_org_context
 from app.db_models import RefreshToken, User
+from app.secrets import get_secret
 
-JWT_SECRET = os.getenv("VAHANNETRA_JWT_SECRET", "change-me-in-production-very-long-secret-key-32chars")
+JWT_SECRET = get_secret("VAHANNETRA_JWT_SECRET", "change-me-in-production-very-long-secret-key-32chars") or ""
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = int(os.getenv("VAHANNETRA_ACCESS_TOKEN_MINUTES", "30"))
 REFRESH_TOKEN_DAYS = int(os.getenv("VAHANNETRA_REFRESH_TOKEN_DAYS", "14"))
@@ -103,6 +104,7 @@ def get_current_user(
     if user.organization_id != payload.get("org_id"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Organization scope mismatch")
 
+    set_org_context(db, user.organization_id)
     return user
 
 

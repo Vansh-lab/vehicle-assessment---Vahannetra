@@ -12,12 +12,14 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/states/empty-state";
 import { ErrorState } from "@/components/states/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useConfirm } from "@/components/providers/confirm-provider";
 
 export default function HistoryPage() {
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateFilter, setDateFilter] = useState("");
+  const { confirm } = useConfirm();
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["history", search, severityFilter, statusFilter, dateFilter],
@@ -29,6 +31,11 @@ export default function HistoryPage() {
   const handleDownload = async (inspectionId: string, event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    const accepted = await confirm({
+      title: "Download report PDF",
+      message: "This will generate and open the signed inspection PDF report.",
+    });
+    if (!accepted) return;
     const url = await downloadInspectionReport(inspectionId);
     window.open(url, "_blank", "noopener,noreferrer");
   };
