@@ -2,7 +2,8 @@ import json
 import os
 import random
 import uuid
-from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -30,7 +31,6 @@ from app.pdf_reports import render_inspection_report
 from app.services.detector import DamageDetector
 from app.utils.assessment import calculate_dsi
 
-app = FastAPI(title="AI Vehicle Assessment Backend")
 detector = DamageDetector()
 otp_provider = get_otp_provider()
 
@@ -38,18 +38,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 SeverityLevel = Literal["low", "medium", "high"]
 InspectionStatus = Literal["Completed", "Pending", "Failed"]
 Theme = Literal["dark", "light"]
 UserRole = Literal["admin", "manager", "inspector"]
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def ensure_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def isoformat_utc_z(value: datetime) -> str:
+    return ensure_utc(value).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class AuthLoginRequest(BaseModel):
@@ -206,7 +210,7 @@ def issue_token_bundle(db: Session, user: User, organization: Organization) -> A
     return AuthResponse(
         access_token=create_access_token(user),
         refresh_token=create_refresh_token(db, user),
-        issued_at=datetime.utcnow().isoformat() + "Z",
+        issued_at=isoformat_utc_z(utc_now()),
         user={
             "id": user.id,
             "name": user.name,
@@ -226,7 +230,7 @@ def to_history_item(record: Inspection) -> InspectionHistoryItem:
         id=record.id,
         plate=record.plate,
         model=record.model,
-        date=record.date.isoformat() + "Z",
+        date=isoformat_utc_z(record.date),
         severity=record.severity,
         status=record.status,
         risk_score=record.risk_score,
@@ -243,7 +247,7 @@ def to_inspection_detail(record: Inspection) -> InspectionDetail:
             model=record.model,
             vin=record.vin,
             type=record.vehicle_type,
-            inspected_at=record.date.isoformat() + "Z",
+            inspected_at=isoformat_utc_z(record.date),
         ),
         health_score=record.health_score,
         triage_category=record.triage_category,
@@ -278,7 +282,7 @@ def init_seed_data() -> None:
                 model="Hyundai i20",
                 vin="MA3EHKD17A1234567",
                 vehicle_type="4W",
-                date=datetime.utcnow() - timedelta(hours=8),
+                date=utc_now() - timedelta(hours=8),
                 severity="medium",
                 status="Completed",
                 risk_score=58,
@@ -318,7 +322,7 @@ def init_seed_data() -> None:
                 plate="DL3CB7781",
                 model="Honda Activa",
                 vehicle_type="Scooter",
-                date=datetime.utcnow() - timedelta(hours=6),
+                date=utc_now() - timedelta(hours=6),
                 severity="low",
                 status="Completed",
                 risk_score=31,
@@ -333,7 +337,7 @@ def init_seed_data() -> None:
                 plate="KA05MN2211",
                 model="Tata Nexon",
                 vehicle_type="4W",
-                date=datetime.utcnow() - timedelta(hours=4),
+                date=utc_now() - timedelta(hours=4),
                 severity="high",
                 status="Completed",
                 risk_score=84,
@@ -354,9 +358,21 @@ def init_seed_data() -> None:
         db.close()
 
 
-@app.on_event("startup")
-def on_startup() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI):
     init_seed_data()
+    yield
+
+
+app = FastAPI(title="AI Vehicle Assessment Backend", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
@@ -408,7 +424,7 @@ async def auth_forgot_password(payload: ForgotPasswordRequest, db: Session = Dep
             email=user.email,
             code_hash=hash_secret(otp_code),
             purpose="forgot_password",
-            expires_at=datetime.utcnow() + timedelta(minutes=10),
+            expires_at=utc_now() + timedelta(minutes=10),
             used=False,
         )
     )
@@ -430,7 +446,7 @@ async def auth_verify_otp(payload: VerifyOtpRequest, db: Session = Depends(get_d
         .order_by(OtpCode.id.desc())
         .first()
     )
-    if not otp_record or otp_record.expires_at < datetime.utcnow() or otp_record.code_hash != hash_secret(payload.otp):
+    if not otp_record or ensure_utc(otp_record.expires_at) < utc_now() or otp_record.code_hash != hash_secret(payload.otp):
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
     otp_record.used = True
@@ -461,7 +477,7 @@ async def dashboard_overview(
     health = FleetHealth(
         score=avg_health,
         attention_vehicles=len(attention),
-        inspections_today=len([item for item in all_items if item.date.date() == datetime.utcnow().date()]),
+        inspections_today=len([item for item in all_items if item.date.date() == utc_now().date()]),
         active_alerts=len([item for item in all_items if item.severity == "high"]),
     )
 
@@ -495,7 +511,7 @@ async def assess_damage(
         for index, det in enumerate(raw_detections)
     ]
 
-    inspection_id = f"INSP-{int(datetime.utcnow().timestamp())}-{uuid.uuid4().hex[:6]}"
+    inspection_id = f"INSP-{int(utc_now().timestamp())}-{uuid.uuid4().hex[:6]}"
     inspection = Inspection(
         id=inspection_id,
         organization_id=current_user.organization_id,
@@ -503,7 +519,7 @@ async def assess_damage(
         model="Unknown",
         vin=None,
         vehicle_type="4W",
-        date=datetime.utcnow(),
+        date=utc_now(),
         severity=severity,
         status="Completed",
         risk_score=min(100, int(dsi_score)),

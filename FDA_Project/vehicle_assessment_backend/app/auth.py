@@ -21,6 +21,14 @@ REFRESH_TOKEN_DAYS = int(os.getenv("VAHANNETRA_REFRESH_TOKEN_DAYS", "14"))
 security = HTTPBearer(auto_error=False)
 
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def ensure_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
 def hash_secret(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -42,7 +50,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def create_access_token(user: User) -> str:
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     payload: dict[str, Any] = {
         "sub": user.id,
         "email": user.email,
@@ -58,7 +66,7 @@ def create_access_token(user: User) -> str:
 def create_refresh_token(db: Session, user: User) -> str:
     token = secrets.token_urlsafe(48)
     token_hash = hash_secret(token)
-    expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_DAYS)
+    expires_at = utc_now() + timedelta(days=REFRESH_TOKEN_DAYS)
     db.add(RefreshToken(token_hash=token_hash, user_id=user.id, expires_at=expires_at, revoked=False))
     db.commit()
     return token
@@ -112,7 +120,7 @@ def exchange_refresh_token(db: Session, refresh_token: str) -> User:
     token_record = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
     if not token_record or token_record.revoked:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-    if token_record.expires_at < datetime.utcnow():
+    if ensure_utc(token_record.expires_at) < utc_now():
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
 
     user = db.query(User).filter(User.id == token_record.user_id).first()

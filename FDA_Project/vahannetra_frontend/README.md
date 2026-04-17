@@ -138,7 +138,8 @@ src/
 ### Still missing for full production backend
 - ❌ External managed OTP provider (Twilio/SendGrid/etc.) with delivery callbacks and retry telemetry
 - ❌ Multi-tenant hardening beyond org claim checks (e.g., row-level policy at DB layer)
-- ❌ Full timezone-aware datetime migration (`datetime.utcnow` deprecation cleanup)
+- ✅ Full timezone-aware datetime migration (`datetime.utcnow` deprecation cleanup)
+- ✅ FastAPI startup lifecycle migrated from `on_event` to lifespan
 - ❌ Secret management via vault/KMS (currently env-based secret)
 
 ## Mock Responses
