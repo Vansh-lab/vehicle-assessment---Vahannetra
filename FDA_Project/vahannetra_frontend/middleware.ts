@@ -5,7 +5,9 @@ const apiOrigin = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000
 const isDev = process.env.NODE_ENV !== "production";
 
 function createNonce() {
-  return btoa(crypto.randomUUID());
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return btoa(hex);
 }
 
 export function middleware(request: NextRequest) {

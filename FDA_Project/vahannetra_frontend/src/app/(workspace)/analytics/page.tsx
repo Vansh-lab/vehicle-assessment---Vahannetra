@@ -26,7 +26,8 @@ function ChartCanvas({ children }: { children: (size: { width: number; height: n
     const syncSize = () => {
       const nextWidth = element.clientWidth;
       const nextHeight = element.clientHeight;
-      setSize((prev) => (hasSameSize(prev, { width: nextWidth, height: nextHeight }) ? prev : { width: nextWidth, height: nextHeight }));
+      const nextSize = { width: nextWidth, height: nextHeight };
+      setSize((prev) => (hasSameSize(prev, nextSize) ? prev : nextSize));
     };
 
     syncSize();
