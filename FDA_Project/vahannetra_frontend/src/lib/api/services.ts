@@ -24,10 +24,10 @@ import type { HistoryItem } from "@/types/domain";
 const USE_BACKEND = process.env.NEXT_PUBLIC_USE_BACKEND === "true";
 
 function extractProcessedFilename(processedImagePath: string): string | null {
-  const value = processedImagePath.trim();
+  const value = processedImagePath.trim().replace(/\/+$/, "");
   if (!value) return null;
-  const parts = value.split("/");
-  const filename = parts[parts.length - 1];
+  const parts = value.split("/").filter(Boolean);
+  const filename = parts.at(-1);
   return filename || null;
 }
 

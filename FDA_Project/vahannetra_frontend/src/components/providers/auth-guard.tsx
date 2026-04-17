@@ -7,6 +7,8 @@ import { isSessionActive } from "@/lib/auth/session";
 import { Card } from "@/components/ui/card";
 
 function subscribeSession() {
+  // Session is read from storage on render; we intentionally use a no-op subscriber
+  // so useSyncExternalStore provides consistent server/client snapshots.
   return () => {};
 }
 
