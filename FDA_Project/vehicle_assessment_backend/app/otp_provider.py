@@ -45,7 +45,7 @@ class SmtpOtpProvider(OtpProvider):
         self.username = username
         self.password = password
         self.sender = sender
-        self.max_retries = max(1, max_retries)
+        self.max_retries = min(5, max(1, max_retries))
 
     def send_otp(self, email: str, otp_code: str) -> OtpSendResult:
         msg = MIMEText(f"Your Vahannetra OTP is: {otp_code}. It expires in 10 minutes.")

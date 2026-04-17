@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+const apiOrigin = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+
 const nextConfig: NextConfig = {
   async headers() {
     return [
@@ -13,7 +15,7 @@ const nextConfig: NextConfig = {
           {
             key: "Content-Security-Policy",
             value:
-              "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self' http://localhost:8000 https:; object-src 'none'; frame-ancestors 'none';",
+              `default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self' ${apiOrigin} https:; object-src 'none'; frame-ancestors 'none';`,
           },
         ],
       },

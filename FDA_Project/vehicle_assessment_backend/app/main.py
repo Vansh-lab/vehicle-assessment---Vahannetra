@@ -2,6 +2,7 @@ import json
 import hmac
 import os
 import random
+import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -601,7 +602,8 @@ async def assess_damage(
     payload = await file.read()
     validate_upload(file, payload)
 
-    sanitized_name = Path(file.filename or "upload").name.replace(" ", "_")
+    base_name = Path(file.filename or "upload").name
+    sanitized_name = re.sub(r"[^A-Za-z0-9._-]", "_", base_name)
     safe_name = f"{uuid.uuid4().hex}_{sanitized_name}"
     file_path = UPLOAD_DIR / safe_name
     with open(file_path, "wb") as output_file:

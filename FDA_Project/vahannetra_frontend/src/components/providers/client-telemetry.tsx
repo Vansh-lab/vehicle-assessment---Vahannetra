@@ -21,7 +21,9 @@ async function sendClientError(payload: {
       keepalive: true,
     });
   } catch {
-    // Best-effort telemetry: swallow network errors.
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("Client telemetry send failed");
+    }
   }
 }
 
