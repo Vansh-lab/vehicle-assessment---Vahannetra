@@ -1,4 +1,5 @@
 import json
+import hmac
 import os
 import random
 import uuid
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 import cv2
+import numpy as np
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
@@ -251,6 +253,10 @@ def validate_upload(file: UploadFile, payload: bytes) -> None:
     if not (is_jpeg or is_png or is_webp):
         raise HTTPException(status_code=400, detail="Invalid image signature")
 
+    decoded = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if decoded is None:
+        raise HTTPException(status_code=400, detail="Corrupt or unsupported image payload")
+
 
 def issue_token_bundle(db: Session, user: User, organization: Organization) -> AuthResponse:
     return AuthResponse(
@@ -490,7 +496,7 @@ async def auth_forgot_password(payload: ForgotPasswordRequest, db: Session = Dep
     )
     db.commit()
 
-    delivery_event = OtpDeliveryEvent(email=user.email, status="pending")
+    delivery_event = OtpDeliveryEvent(email=user.email, organization_id=user.organization_id, status="pending")
     db.add(delivery_event)
     db.commit()
     db.refresh(delivery_event)
@@ -538,7 +544,7 @@ async def auth_otp_delivery_callback(
 ):
     callback_secret = get_secret("OTP_CALLBACK_SECRET", "dev-callback-secret")
     provided = request.headers.get("X-Callback-Secret")
-    if provided != callback_secret:
+    if not provided or not hmac.compare_digest(provided, callback_secret):
         raise HTTPException(status_code=401, detail="Invalid callback secret")
 
     event = (
@@ -879,8 +885,13 @@ async def patch_settings(
 
 
 @app.post("/telemetry/client-error")
-async def record_client_error(payload: ClientErrorPayload, db: Session = Depends(get_db)):
+async def record_client_error(
+    payload: ClientErrorPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     event = ClientErrorEvent(
+        organization_id=current_user.organization_id,
         level=payload.level,
         message=payload.message[:1000],
         source=(payload.source or "")[:255],

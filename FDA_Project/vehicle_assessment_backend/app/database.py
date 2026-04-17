@@ -33,16 +33,22 @@ def apply_rls_policies() -> None:
     ALTER TABLE claims ENABLE ROW LEVEL SECURITY;
     ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
     ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE otp_delivery_events ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE client_error_events ENABLE ROW LEVEL SECURITY;
 
     ALTER TABLE inspections FORCE ROW LEVEL SECURITY;
     ALTER TABLE claims FORCE ROW LEVEL SECURITY;
     ALTER TABLE settings FORCE ROW LEVEL SECURITY;
     ALTER TABLE users FORCE ROW LEVEL SECURITY;
+    ALTER TABLE otp_delivery_events FORCE ROW LEVEL SECURITY;
+    ALTER TABLE client_error_events FORCE ROW LEVEL SECURITY;
 
     DROP POLICY IF EXISTS inspections_org_scope ON inspections;
     DROP POLICY IF EXISTS claims_org_scope ON claims;
     DROP POLICY IF EXISTS settings_org_scope ON settings;
     DROP POLICY IF EXISTS users_org_scope ON users;
+    DROP POLICY IF EXISTS otp_delivery_events_org_scope ON otp_delivery_events;
+    DROP POLICY IF EXISTS client_error_events_org_scope ON client_error_events;
 
     CREATE POLICY inspections_org_scope
       ON inspections
@@ -61,6 +67,16 @@ def apply_rls_policies() -> None:
 
     CREATE POLICY users_org_scope
       ON users
+      USING (organization_id = current_setting('app.current_org_id', true))
+      WITH CHECK (organization_id = current_setting('app.current_org_id', true));
+
+    CREATE POLICY otp_delivery_events_org_scope
+      ON otp_delivery_events
+      USING (organization_id = current_setting('app.current_org_id', true))
+      WITH CHECK (organization_id = current_setting('app.current_org_id', true));
+
+    CREATE POLICY client_error_events_org_scope
+      ON client_error_events
       USING (organization_id = current_setting('app.current_org_id', true))
       WITH CHECK (organization_id = current_setting('app.current_org_id', true));
     """

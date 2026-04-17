@@ -57,6 +57,7 @@ class OtpDeliveryEvent(Base):
     __tablename__ = "otp_delivery_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[str] = mapped_column(String(64), index=True, default="")
     email: Mapped[str] = mapped_column(String(320), index=True)
     provider: Mapped[str] = mapped_column(String(80), default="console")
     provider_message_id: Mapped[str] = mapped_column(String(200), index=True, default="")
@@ -121,6 +122,7 @@ class ClientErrorEvent(Base):
     __tablename__ = "client_error_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[str] = mapped_column(String(64), index=True, default="")
     level: Mapped[str] = mapped_column(String(20), default="error")
     message: Mapped[str] = mapped_column(String(1000), default="")
     source: Mapped[str] = mapped_column(String(255), default="")

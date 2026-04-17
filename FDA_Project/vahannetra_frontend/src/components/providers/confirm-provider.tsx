@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,23 +21,24 @@ const ConfirmContext = createContext<ConfirmContextValue | null>(null);
 
 interface ConfirmState extends ConfirmOptions {
   open: boolean;
-  resolve?: (accepted: boolean) => void;
 }
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const [state, setState] = useState<ConfirmState>({ open: false });
+  const resolveRef = useRef<((accepted: boolean) => void) | undefined>(undefined);
 
   const close = useCallback((accepted: boolean) => {
-    state.resolve?.(accepted);
+    resolveRef.current?.(accepted);
+    resolveRef.current = undefined;
     setState({ open: false });
-  }, [state]);
+  }, []);
 
   const confirm = useCallback((options?: ConfirmOptions) => {
     return new Promise<boolean>((resolve) => {
+      resolveRef.current = resolve;
       setState({
         open: true,
-        resolve,
         title: options?.title,
         message: options?.message,
         confirmLabel: options?.confirmLabel,

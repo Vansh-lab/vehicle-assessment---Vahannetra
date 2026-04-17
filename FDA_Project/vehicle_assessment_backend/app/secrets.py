@@ -21,6 +21,8 @@ def _vault_lookup(secret_name: str) -> str | None:
     vault_path = os.getenv("VAHANNETRA_VAULT_PATH", "secret/data/vahannetra")
     if not vault_addr or not vault_token:
         return None
+    if not vault_addr.startswith("https://"):
+        return None
 
     request = Request(
         f"{vault_addr.rstrip('/')}/v1/{vault_path.lstrip('/')}",
