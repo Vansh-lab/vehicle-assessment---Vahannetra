@@ -6,10 +6,21 @@ import { useRouter } from "next/navigation";
 import { isSessionActive } from "@/lib/auth/session";
 import { Card } from "@/components/ui/card";
 
-function subscribeSession() {
-  // Session is read from storage on render; we intentionally use a no-op subscriber
-  // so useSyncExternalStore provides consistent server/client snapshots.
-  return () => {};
+function subscribeSession(onStoreChange: () => void) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === null || event.key === "vahannetra_session") {
+      onStoreChange();
+    }
+  };
+
+  window.addEventListener("storage", handleStorage);
+  return () => {
+    window.removeEventListener("storage", handleStorage);
+  };
 }
 
 export function AuthGuard({ children }: { children: ReactNode }) {
