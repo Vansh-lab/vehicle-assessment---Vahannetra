@@ -38,7 +38,8 @@ async function resolveProcessedImageUrl(processedImagePath: string): Promise<str
   try {
     const blob = await apiBinaryRequest(`/view-result/${encodeURIComponent(filename)}`);
     return URL.createObjectURL(blob);
-  } catch {
+  } catch (error) {
+    console.warn("Failed to fetch authenticated processed image. Falling back to direct URL.", error);
     return `${API_BASE_URL}/${processedImagePath}`;
   }
 }
