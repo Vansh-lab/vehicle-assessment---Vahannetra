@@ -23,6 +23,27 @@ import type { HistoryItem } from "@/types/domain";
 
 const USE_BACKEND = process.env.NEXT_PUBLIC_USE_BACKEND === "true";
 
+function extractProcessedFilename(processedImagePath: string): string | null {
+  const value = processedImagePath.trim().replace(/\/+$/, "");
+  if (!value) return null;
+  const parts = value.split("/").filter(Boolean);
+  const filename = parts.at(-1);
+  return filename ?? null;
+}
+
+async function resolveProcessedImageUrl(processedImagePath: string): Promise<string> {
+  const filename = extractProcessedFilename(processedImagePath);
+  if (!filename) return `${API_BASE_URL}/${processedImagePath}`;
+
+  try {
+    const blob = await apiBinaryRequest(`/view-result/${encodeURIComponent(filename)}`);
+    return URL.createObjectURL(blob);
+  } catch (error) {
+    console.warn(`Failed to fetch authenticated processed image for "${filename}". Falling back to direct URL.`, error);
+    return `${API_BASE_URL}/${processedImagePath}`;
+  }
+}
+
 function normalizeDetectionType(value: string): ResultResponse["findings"][number]["type"] {
   const normalized = value.toLowerCase();
   if (
@@ -152,6 +173,7 @@ export async function assessDamageWithBackend(
     method: "POST",
     body: formData,
   });
+  const processedImageUrl = await resolveProcessedImageUrl(data.processed_image_url);
 
   const severity = mapSeverityFromScore(data.inspection_summary.dsi_score);
 
@@ -166,7 +188,7 @@ export async function assessDamageWithBackend(
     },
     healthScore: Math.max(0, 100 - Math.round(data.inspection_summary.dsi_score)),
     triageCategory: data.inspection_summary.triage_category,
-    processedImageUrl: `${API_BASE_URL}/${data.processed_image_url}`,
+    processedImageUrl,
     findings: data.findings.map((item, index) => ({
       id: `DMG-${index + 1}`,
       type: normalizeDetectionType(item.class),
@@ -312,6 +334,7 @@ export async function getInspectionDetail(id: string): Promise<ResultResponse> {
       box: [number, number, number, number];
     }>;
   }>(`/inspections/${id}`);
+  const processedImageUrl = await resolveProcessedImageUrl(data.processed_image_url);
 
   return {
     inspectionId: data.inspection_id,
@@ -324,7 +347,7 @@ export async function getInspectionDetail(id: string): Promise<ResultResponse> {
     },
     healthScore: data.health_score,
     triageCategory: data.triage_category,
-    processedImageUrl: `${API_BASE_URL}/${data.processed_image_url}`,
+    processedImageUrl,
     findings: data.findings.map((item) => ({
       id: item.id,
       type: item.type,

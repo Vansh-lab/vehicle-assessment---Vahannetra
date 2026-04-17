@@ -26,11 +26,27 @@ const initialState = {
   latestResult: null,
 };
 
+function revokeBlobUrl(url?: string | null) {
+  if (url?.startsWith("blob:")) {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export const useInspectionStore = create<InspectionState>((set) => ({
   ...initialState,
   setVehicleInfo: ({ vehicleType, plate, model, vin }) => set({ vehicleType, plate, model, vin }),
   setAngles: (selectedAngles) => set({ selectedAngles }),
   setFile: (selectedFile) => set({ selectedFile }),
-  setResult: (latestResult) => set({ latestResult }),
-  reset: () => set(initialState),
+  setResult: (latestResult) =>
+    set((state) => {
+      if (state.latestResult?.processedImageUrl !== latestResult?.processedImageUrl) {
+        revokeBlobUrl(state.latestResult?.processedImageUrl);
+      }
+      return { latestResult };
+    }),
+  reset: () =>
+    set((state) => {
+      revokeBlobUrl(state.latestResult?.processedImageUrl);
+      return initialState;
+    }),
 }));
