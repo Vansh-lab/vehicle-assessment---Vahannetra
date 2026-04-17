@@ -28,7 +28,7 @@ function extractProcessedFilename(processedImagePath: string): string | null {
   if (!value) return null;
   const parts = value.split("/");
   const filename = parts[parts.length - 1];
-  return filename ? filename : null;
+  return filename || null;
 }
 
 async function resolveProcessedImageUrl(processedImagePath: string): Promise<string> {
@@ -39,7 +39,7 @@ async function resolveProcessedImageUrl(processedImagePath: string): Promise<str
     const blob = await apiBinaryRequest(`/view-result/${encodeURIComponent(filename)}`);
     return URL.createObjectURL(blob);
   } catch (error) {
-    console.warn("Failed to fetch authenticated processed image. Falling back to direct URL.", error);
+    console.warn(`Failed to fetch authenticated processed image for "${filename}". Falling back to direct URL.`, error);
     return `${API_BASE_URL}/${processedImagePath}`;
   }
 }

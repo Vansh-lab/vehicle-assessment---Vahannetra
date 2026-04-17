@@ -7,7 +7,8 @@ const isDev = process.env.NODE_ENV !== "production";
 function createNonce() {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
-  return btoa(String.fromCharCode(...bytes));
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+  return btoa(binary);
 }
 
 export function middleware(request: NextRequest) {
