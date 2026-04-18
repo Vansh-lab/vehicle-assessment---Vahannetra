@@ -57,6 +57,46 @@ What remains:
 
 ---
 
+## Backend / Frontend / UI integration checklist (explicit)
+
+### Backend status
+
+Done:
+
+- Async router split and v1 surface active.
+- Test suite passing (`PYTHONPATH=. pytest -q`).
+- Connector/retry/circuit-breaker layer integrated.
+
+Potential non-blocking improvements (not release blockers):
+
+- Observability expansion for runtime proof (centralized dashboard links for deploy/rollback evidence).
+
+### Frontend status
+
+Done:
+
+- Vite migration complete.
+- Lint/build/e2e passing (`npm run lint && npm run build && npm run test:e2e`).
+- Advanced inspection features active (geo map, PDF, voice).
+
+Potential non-blocking improvements (not release blockers):
+
+- Frontend bundle size optimization (build warns about large chunk).
+
+### UI/UX + integration status
+
+Done:
+
+- Workspace route parity in place.
+- Frontend-backend API integration flows validated by e2e and backend tests.
+
+Remaining true blockers (external-runtime only):
+
+- Live AWS runtime proof execution and evidence capture in org AWS environment.
+- CodeQL platform/settings remediation so scan jobs execute.
+
+---
+
 ## Final completion criteria for this phase
 
 - [ ] Live AWS deploy run succeeded with perf evidence artifact.

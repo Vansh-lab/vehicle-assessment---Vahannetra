@@ -55,4 +55,5 @@ You can access the interactive Swagger UI documentation at `http://localhost:800
 ## Deployment & Phase Closure References
 
 - AWS live runtime proof runbook: `FDA_Project/aws-runtime-proof-runbook.md`
+- Operator-mode final execution order: `FDA_Project/operator-mode-runtime-proof.md`
 - Phase closure audit (closed vs remaining external blockers): `FDA_Project/phase-c-closure-audit.md`
