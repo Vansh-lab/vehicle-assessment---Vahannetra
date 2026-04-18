@@ -290,7 +290,9 @@ class InsurerConnector:
         )
         provider_reference = str(payload.get("provider_reference", "")).strip()
         if not provider_reference:
-            provider_reference = f"{normalized_destination}-{hashlib.sha256(json.dumps(payload, sort_keys=True).encode('utf-8')).hexdigest()[:8].upper()}"
+            payload_json = json.dumps(payload, sort_keys=True)
+            payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+            provider_reference = f"{normalized_destination}-{payload_hash[:8].upper()}"
         return InsurerClaimResult(
             provider_reference=provider_reference,
             accepted=bool(payload.get("accepted", True)),

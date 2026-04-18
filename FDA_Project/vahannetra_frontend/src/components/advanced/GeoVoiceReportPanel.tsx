@@ -55,8 +55,17 @@ export function GeoVoiceReportPanel({
         const lng = Number(geo.coords.longitude.toFixed(6));
         setPosition({ lat, lng });
         try {
+          const nominatimUrl =
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}` +
+            `&email=support@vahannetra.local`;
           const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`
+            nominatimUrl,
+            {
+              headers: {
+                "Accept-Language": "en-IN,en;q=0.9",
+                "X-Client": "VahanNetra",
+              },
+            }
           );
           if (!response.ok) throw new Error("reverse geocode failed");
           const payload = (await response.json()) as { display_name?: string };

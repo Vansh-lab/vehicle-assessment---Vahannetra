@@ -120,8 +120,8 @@ services:
     build:
       context: ./vahannetra_frontend
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://api:8000
-      NEXT_PUBLIC_USE_BACKEND: "true"
+      VITE_API_BASE_URL: http://api:8000
+      VITE_USE_BACKEND: "true"
     ports:
       - "3000:3000"
     depends_on:
