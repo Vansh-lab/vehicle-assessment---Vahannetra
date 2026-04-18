@@ -17,10 +17,14 @@ async def v1_dashboard_stats(
     current_user: User = Depends(get_current_user),
 ):
     inspections_result = await db.execute(
-        select(Inspection).where(Inspection.organization_id == current_user.organization_id)
+        select(Inspection).where(
+            Inspection.organization_id == current_user.organization_id
+        )
     )
     jobs_result = await db.execute(
-        select(InspectionJob).where(InspectionJob.organization_id == current_user.organization_id)
+        select(InspectionJob).where(
+            InspectionJob.organization_id == current_user.organization_id
+        )
     )
     inspections = inspections_result.scalars().all()
     jobs = jobs_result.scalars().all()
@@ -28,8 +32,18 @@ async def v1_dashboard_stats(
     total = len(inspections)
     completed = len([item for item in inspections if item.status == "Completed"])
     auto_approved = len([item for item in jobs if item.auto_approve])
-    avg_dsq = round(sum([item.dsq_score for item in jobs]) / len(jobs), 2) if jobs else 0.0
-    fraud_rate = round((len([item for item in jobs if item.fraud_risk_score > 60]) / len(jobs)) * 100, 2) if jobs else 0.0
+    avg_dsq = (
+        round(sum([item.dsq_score for item in jobs]) / len(jobs), 2) if jobs else 0.0
+    )
+    fraud_rate = (
+        round(
+            (len([item for item in jobs if item.fraud_risk_score > 60]) / len(jobs))
+            * 100,
+            2,
+        )
+        if jobs
+        else 0.0
+    )
 
     return {
         "total_inspections": total,
@@ -48,7 +62,9 @@ async def v1_dashboard_timeline(
     current_user: User = Depends(get_current_user),
 ):
     inspections_result = await db.execute(
-        select(Inspection.date).where(Inspection.organization_id == current_user.organization_id)
+        select(Inspection.date).where(
+            Inspection.organization_id == current_user.organization_id
+        )
     )
     inspection_dates = inspections_result.scalars().all()
 
@@ -63,5 +79,8 @@ async def v1_dashboard_timeline(
         if key in bucket:
             bucket[key] += 1
 
-    items = [{"date": date_key, "count": bucket[date_key]} for date_key in sorted(bucket.keys())]
+    items = [
+        {"date": date_key, "count": bucket[date_key]}
+        for date_key in sorted(bucket.keys())
+    ]
     return {"items": items}

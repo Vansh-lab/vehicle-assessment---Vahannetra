@@ -9,8 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.settings import settings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = os.getenv("VAHANNETRA_DB_PATH", settings.db_path or str(BASE_DIR / "vahannetra.db"))
-DATABASE_URL = os.getenv("VAHANNETRA_DATABASE_URL", settings.database_url or f"sqlite:///{DB_PATH}")
+DB_PATH = os.getenv(
+    "VAHANNETRA_DB_PATH", settings.db_path or str(BASE_DIR / "vahannetra.db")
+)
+DATABASE_URL = os.getenv(
+    "VAHANNETRA_DATABASE_URL", settings.database_url or f"sqlite:///{DB_PATH}"
+)
 
 
 def _derive_async_database_url(database_url: str) -> str:
@@ -21,18 +25,32 @@ def _derive_async_database_url(database_url: str) -> str:
     return database_url
 
 
-ASYNC_DATABASE_URL = os.getenv("VAHANNETRA_ASYNC_DATABASE_URL", _derive_async_database_url(DATABASE_URL))
+ASYNC_DATABASE_URL = os.getenv(
+    "VAHANNETRA_ASYNC_DATABASE_URL", _derive_async_database_url(DATABASE_URL)
+)
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
+    connect_args=(
+        {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+    ),
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 async_engine = create_async_engine(
     ASYNC_DATABASE_URL,
-    connect_args={"check_same_thread": False} if ASYNC_DATABASE_URL.startswith("sqlite+aiosqlite") else {},
+    connect_args=(
+        {"check_same_thread": False}
+        if ASYNC_DATABASE_URL.startswith("sqlite+aiosqlite")
+        else {}
+    ),
 )
-AsyncSessionLocal = async_sessionmaker(bind=async_engine, class_=AsyncSession, autocommit=False, autoflush=False)
+AsyncSessionLocal = async_sessionmaker(
+    bind=async_engine,
+    class_=AsyncSession,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+)
 
 
 class Base(DeclarativeBase):
@@ -108,7 +126,10 @@ def apply_rls_policies() -> None:
 def set_org_context(db: Session, organization_id: str) -> None:
     if not is_postgres():
         return
-    db.execute(text("SELECT set_config('app.current_org_id', :org_id, true)"), {"org_id": organization_id})
+    db.execute(
+        text("SELECT set_config('app.current_org_id', :org_id, true)"),
+        {"org_id": organization_id},
+    )
 
 
 def get_db() -> Generator[Session, None, None]:

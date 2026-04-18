@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 SEVERITY_WEIGHTS = {"low": 0.35, "medium": 0.65, "high": 1.0}
 TYPE_WEIGHTS = {
     "scratch": 0.4,
@@ -68,7 +67,9 @@ def _component_breakdown(score: float) -> dict[str, float]:
     }
 
 
-def compute_dsq_v2(findings: list[dict], image_shape: tuple[int, int, int] = (720, 1280, 3)) -> DSQv2Result:
+def compute_dsq_v2(
+    findings: list[dict], image_shape: tuple[int, int, int] = (720, 1280, 3)
+) -> DSQv2Result:
     if not findings:
         return DSQv2Result(
             score=0.0,
@@ -86,7 +87,9 @@ def compute_dsq_v2(findings: list[dict], image_shape: tuple[int, int, int] = (72
     weighted_area = 0.0
     confidence_values: list[float] = []
     for item in findings:
-        det_type = _normalized_detection_type(str(item.get("type") or item.get("class") or ""))
+        det_type = _normalized_detection_type(
+            str(item.get("type") or item.get("class") or "")
+        )
         severity = _normalized_severity(str(item.get("severity") or "medium"))
         area = _box_area(item.get("box", []))
         type_weight = TYPE_WEIGHTS[det_type]
@@ -97,7 +100,9 @@ def compute_dsq_v2(findings: list[dict], image_shape: tuple[int, int, int] = (72
         confidence_values.append(max(0.0, min(1.0, confidence)))
 
     area_ratio = min(1.0, weighted_area / image_area)
-    avg_confidence = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
+    avg_confidence = (
+        sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
+    )
 
     score = round(min(100.0, (area_ratio * 85.0) + (avg_confidence * 15.0)), 2)
     fraud_risk_score = round(min(100.0, score * 0.62), 2)
