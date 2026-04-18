@@ -6,6 +6,7 @@ import { jsPDF } from "jspdf";
 import type { DamageFinding } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { env } from "@/lib/env";
 
 type Position = { lat: number; lng: number } | null;
 type SpeechRecognitionCtor = new () => {
@@ -57,13 +58,13 @@ export function GeoVoiceReportPanel({
         try {
           const nominatimUrl =
             `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}` +
-            `&email=support@vahannetra.local`;
+            `&email=${encodeURIComponent(env.NOMINATIM_CONTACT_EMAIL)}`;
           const response = await fetch(
             nominatimUrl,
             {
               headers: {
                 "Accept-Language": "en-IN,en;q=0.9",
-                "X-Client": "VahanNetra",
+                "X-VahanNetra-Client": "VahanNetra",
               },
             }
           );
