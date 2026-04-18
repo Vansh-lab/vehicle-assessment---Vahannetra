@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -13,9 +14,11 @@ class ScopeLock:
     infra_source: str
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 SCOPE_LOCK = ScopeLock(
     strategy="incremental_upgrade",
-    source_root="/home/runner/work/vehicle-assessment---Vahannetra/vehicle-assessment---Vahannetra",
+    source_root=str(REPO_ROOT),
     target_root="vahannetra",
     backend_source="FDA_Project/vehicle_assessment_backend",
     frontend_source="FDA_Project/vahannetra_frontend",

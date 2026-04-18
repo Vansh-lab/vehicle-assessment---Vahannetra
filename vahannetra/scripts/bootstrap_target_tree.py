@@ -8,17 +8,17 @@ from vahannetra.project_scope import TARGET_DIRECTORY_MAP
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
 
-    created = []
+    created_paths = []
     for target in TARGET_DIRECTORY_MAP.values():
         path = repo_root / target
         if path.exists():
             continue
         path.mkdir(parents=True, exist_ok=True)
-        created.append(str(path.relative_to(repo_root)))
+        created_paths.append(str(path.relative_to(repo_root)))
 
-    if created:
+    if created_paths:
         print("created_paths=")
-        for item in created:
+        for item in created_paths:
             print(f"  - {item}")
     else:
         print("created_paths=none")

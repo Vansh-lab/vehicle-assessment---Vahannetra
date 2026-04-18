@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+import json
 import sys
 from pathlib import Path
 
@@ -35,26 +35,17 @@ def verify_required_paths() -> tuple[list[str], list[str]]:
 
 def main() -> int:
     missing_source, missing_target = verify_required_paths()
-
-    print(f"strategy={SCOPE_LOCK.strategy}")
-    print(f"source_root={SCOPE_LOCK.source_root}")
-    print(f"target_root={SCOPE_LOCK.target_root}")
-
-    if missing_source:
-        print("missing_source_paths=")
-        for item in missing_source:
-            print(f"  - {item}")
-
-    if missing_target:
-        print("missing_target_paths=")
-        for item in missing_target:
-            print(f"  - {item}")
-
-    if missing_source or missing_target:
-        return 1
-
-    print("scope_lock_verification=ok")
-    return 0
+    status = "ok" if not missing_source and not missing_target else "missing_paths"
+    payload = {
+        "strategy": SCOPE_LOCK.strategy,
+        "source_root": SCOPE_LOCK.source_root,
+        "target_root": SCOPE_LOCK.target_root,
+        "missing_source_paths": missing_source,
+        "missing_target_paths": missing_target,
+        "scope_lock_verification": status,
+    }
+    print(json.dumps(payload, indent=2))
+    return 0 if status == "ok" else 1
 
 
 if __name__ == "__main__":
