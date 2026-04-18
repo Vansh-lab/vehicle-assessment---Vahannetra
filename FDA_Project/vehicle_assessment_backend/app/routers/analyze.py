@@ -318,7 +318,8 @@ async def v1_analyze_video(
 
     fused = _fuse_detections_with_nms(detections)
 
-    # Fixed key contract from spec
+    # Fixed key contract from product spec: backend stores canonical object key
+    # as input_video.mp4 for downstream consumers, independent of upload mime.
     video_key = f"jobs/{job_id}/input_video.mp4"
     await storage_service.upload_bytes(
         video_key, payload, file.content_type or "video/webm"
