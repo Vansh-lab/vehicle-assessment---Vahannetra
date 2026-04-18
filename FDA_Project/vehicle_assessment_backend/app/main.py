@@ -52,6 +52,9 @@ from app.db_models import (
 )
 from app.otp_provider import get_otp_provider
 from app.pdf_reports import render_inspection_report
+from app.core.settings import settings
+from app.middleware.request_context import request_context_middleware
+from app.routers.system import router as system_router
 from app.secrets import get_secret
 from app.services.detector import DamageDetector
 from app.utils.assessment import calculate_dsi
@@ -699,7 +702,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="AI Vehicle Assessment Backend", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -723,9 +726,17 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def add_request_context(request: Request, call_next):
+    return await request_context_middleware(request, call_next)
+
+
 @app.get("/")
 async def root():
     return {"message": "AI Vehicle Assessment API is running", "docs": "/docs"}
+
+
+app.include_router(system_router)
 
 
 @app.post("/auth/login", response_model=AuthResponse)

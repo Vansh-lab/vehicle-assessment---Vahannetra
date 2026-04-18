@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  backend-tests:
-    name: Backend tests
+  test:
+    name: Test (backend)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,8 +33,8 @@ jobs:
       - name: Run tests
         run: PYTHONPATH=. pytest -q
 
-  frontend-lint-build:
-    name: Frontend lint and build
+  lint:
+    name: Lint (frontend)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -56,5 +56,35 @@ jobs:
       - name: Lint
         run: npm run lint
 
+  build:
+    name: Build (frontend)
+    runs-on: ubuntu-latest
+    needs: [lint]
+    defaults:
+      run:
+        working-directory: FDA_Project/vahannetra_frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: FDA_Project/vahannetra_frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Build
         run: npm run build
+
+  deploy:
+    name: Deploy (placeholder)
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+      - name: Deploy placeholder
+        run: echo "Deployment stage scaffold is ready."

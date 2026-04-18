@@ -65,6 +65,8 @@ def test_v1_health_and_stats_endpoints():
     assert health.status_code == 200
     health_payload = health.json()
     assert health_payload["database"] in {"up", "down"}
+    assert "X-Request-Id" in health.headers
+    assert "X-Response-Time-Ms" in health.headers
 
     stats = client.get("/api/v1/dashboard/stats", headers=headers)
     assert stats.status_code == 200
@@ -73,6 +75,10 @@ def test_v1_health_and_stats_endpoints():
     timeline = client.get("/api/v1/dashboard/timeline?days=7", headers=headers)
     assert timeline.status_code == 200
     assert len(timeline.json()["items"]) == 7
+
+    capabilities = client.get("/api/v1/system/capabilities", headers=headers)
+    assert capabilities.status_code == 200
+    assert len(capabilities.json()["pipeline_steps"]) == 14
 
 
 def test_v1_vehicle_create_lookup_and_history():

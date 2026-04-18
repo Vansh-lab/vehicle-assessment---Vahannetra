@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { InspectionStepper } from "@/components/inspection/inspection-stepper";
 import { PhotoUpload } from "@/components/inspection/photo-upload";
+import { VideoCapture } from "@/components/advanced/VideoCapture";
 
 const vehicleTypes: VehicleType[] = ["Motorcycle", "Scooter", "3W", "4W"];
 const angles: CaptureAngle[] = ["Front", "Rear", "Left", "Right", "Top", "Interior", "Engine"];
@@ -105,6 +106,7 @@ export default function NewInspectionPage() {
       {step === 3 ? (
         <div className="space-y-4">
           <PhotoUpload file={selectedFile} onFileChange={setFile} />
+          <VideoCapture onCapture={(videoFile) => setFile(videoFile)} />
           <div className="sticky bottom-16 space-y-2 md:bottom-4">
             <Button className="w-full" disabled={!selectedFile} onClick={submitInspection}>Analyze Damage</Button>
             {!selectedFile ? <p className="text-center text-xs text-slate-400">Upload at least one image to continue.</p> : null}

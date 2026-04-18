@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -10,14 +9,14 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.settings import settings
 from app.database import get_db, set_org_context
 from app.db_models import RefreshToken, User
-from app.secrets import get_secret
 
-JWT_SECRET = get_secret("VAHANNETRA_JWT_SECRET", "change-me-in-production-very-long-secret-key-32chars") or ""
-JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_MINUTES = int(os.getenv("VAHANNETRA_ACCESS_TOKEN_MINUTES", "30"))
-REFRESH_TOKEN_DAYS = int(os.getenv("VAHANNETRA_REFRESH_TOKEN_DAYS", "14"))
+JWT_SECRET = settings.jwt_secret or ""
+JWT_ALGORITHM = settings.jwt_algorithm
+ACCESS_TOKEN_MINUTES = settings.access_token_minutes
+REFRESH_TOKEN_DAYS = settings.refresh_token_days
 
 security = HTTPBearer(auto_error=False)
 

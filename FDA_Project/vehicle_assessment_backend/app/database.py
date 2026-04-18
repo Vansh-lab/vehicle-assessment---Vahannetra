@@ -5,9 +5,11 @@ from typing import Generator
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+from app.core.settings import settings
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = os.getenv("VAHANNETRA_DB_PATH", str(BASE_DIR / "vahannetra.db"))
-DATABASE_URL = os.getenv("VAHANNETRA_DATABASE_URL", f"sqlite:///{DB_PATH}")
+DB_PATH = os.getenv("VAHANNETRA_DB_PATH", settings.db_path or str(BASE_DIR / "vahannetra.db"))
+DATABASE_URL = os.getenv("VAHANNETRA_DATABASE_URL", settings.database_url or f"sqlite:///{DB_PATH}")
 
 engine = create_engine(
     DATABASE_URL,
