@@ -39,7 +39,15 @@ class ConsoleOtpProvider(OtpProvider):
 class SmtpOtpProvider(OtpProvider):
     provider_name = "smtp"
 
-    def __init__(self, host: str, port: int, username: str, password: str, sender: str, max_retries: int = 3):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        sender: str,
+        max_retries: int = 3,
+    ):
         self.host = host
         self.port = port
         self.username = username
