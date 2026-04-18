@@ -1,5 +1,24 @@
 type OptionalString = string | undefined;
 
+function readNextPublicEnv(key: string): OptionalString {
+  switch (key) {
+    case "NEXT_PUBLIC_API_BASE_URL":
+      return process.env.NEXT_PUBLIC_API_BASE_URL;
+    case "NEXT_PUBLIC_USE_BACKEND":
+      return process.env.NEXT_PUBLIC_USE_BACKEND;
+    case "NEXT_PUBLIC_E2E_BYPASS_AUTH":
+      return process.env.NEXT_PUBLIC_E2E_BYPASS_AUTH;
+    case "NEXT_PUBLIC_E2E_BYPASS_CONFIRM":
+      return process.env.NEXT_PUBLIC_E2E_BYPASS_CONFIRM;
+    case "NEXT_PUBLIC_NOMINATIM_CONTACT_EMAIL":
+      return process.env.NEXT_PUBLIC_NOMINATIM_CONTACT_EMAIL;
+    case "NODE_ENV":
+      return process.env.NODE_ENV;
+    default:
+      return undefined;
+  }
+}
+
 function readEnv(viteKey: string, legacyKey: string, fallback?: string): OptionalString {
   const viteEnv =
     typeof import.meta !== "undefined"
@@ -9,7 +28,7 @@ function readEnv(viteKey: string, legacyKey: string, fallback?: string): Optiona
     viteEnv?.[viteKey];
   const legacyValue =
     typeof process !== "undefined"
-      ? (process.env as Record<string, string | undefined> | undefined)?.[legacyKey]
+      ? readNextPublicEnv(legacyKey)
       : undefined;
   return viteValue ?? legacyValue ?? fallback;
 }
