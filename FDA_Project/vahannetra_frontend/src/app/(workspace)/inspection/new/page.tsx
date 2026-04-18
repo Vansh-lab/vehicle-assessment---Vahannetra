@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -28,7 +28,7 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 export default function NewInspectionPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const [step, setStep] = useState(0);
   const [vehicleType, setVehicleType] = useState<VehicleType>("4W");
   const [selectedAngles, setSelectedAngles] = useState<CaptureAngle[]>(["Front"]);
@@ -44,7 +44,7 @@ export default function NewInspectionPage() {
     if (!selectedFile) return;
     setVehicleInfo({ vehicleType, plate: values.plate, model: values.model, vin: values.vin });
     setAngles(selectedAngles);
-    navigate("/inspection/processing");
+    router.push("/inspection/processing");
   };
 
   return (

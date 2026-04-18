@@ -1,6 +1,7 @@
 "use client";
 
-import { Link, useParams } from "react-router-dom";
+import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { downloadInspectionReport, getInspectionDetail } from "@/lib/api/services";
 import { Card } from "@/components/ui/card";
@@ -11,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function HistoryDetailPage() {
   const params = useParams<{ id: string }>();
-  const id = params.id ?? "";
+  const id = typeof params.id === "string" ? params.id : "";
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["inspection-detail", id],
@@ -48,7 +49,7 @@ export default function HistoryDetailPage() {
         <Button className="w-full" onClick={() => downloadMutation.mutate()} disabled={downloadMutation.isPending}>
           {downloadMutation.isPending ? "Preparing PDF..." : "Download PDF report"}
         </Button>
-        <Link to="/inspection/result">
+        <Link href="/inspection/result">
           <Button variant="secondary" className="w-full">
             Open visual diagnostics
           </Button>
