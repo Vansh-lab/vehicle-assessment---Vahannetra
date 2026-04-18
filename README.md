@@ -51,3 +51,8 @@ You can access the interactive Swagger UI documentation at `http://localhost:800
 * `GET /`: Health check endpoint.
 * `POST /assess-damage/`: Upload an image file (`multipart/form-data`) to get an AI damage assessment, DSI score, and a link to the processed image.
 * `GET /view-result/{filename}`: View a specific processed image from the `uploads/` directory.
+
+## Deployment & Phase Closure References
+
+- AWS live runtime proof runbook: `FDA_Project/aws-runtime-proof-runbook.md`
+- Phase closure audit (closed vs remaining external blockers): `FDA_Project/phase-c-closure-audit.md`

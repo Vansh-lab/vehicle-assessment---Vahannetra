@@ -1,4 +1,4 @@
-.PHONY: dev test seed migrate build clean shell logs smoke
+.PHONY: dev test seed migrate build clean shell logs smoke aws-preflight
 
 dev:
 	docker compose -f docker-compose.yml up --build
@@ -26,3 +26,6 @@ logs:
 
 smoke:
 	bash scripts/test_api.sh http://localhost:8000
+
+aws-preflight:
+	bash scripts/aws_deploy_preflight.sh
