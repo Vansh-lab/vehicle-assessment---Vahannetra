@@ -12,19 +12,16 @@ from typing import Literal, Optional
 
 import cv2
 import numpy as np
-from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import (
-    get_current_user,
     hash_password,
-    require_roles,
 )
 from app.database import Base, apply_rls_policies, engine, get_db
 from app.db_models import (
-    Claim,
     Garage,
     InsuranceCenter,
     Inspection,
@@ -43,6 +40,7 @@ from app.routers.dashboard import router as dashboard_router
 from app.routers.health import router as health_router
 from app.routers.inspections import router as inspections_router
 from app.routers.mobility import router as mobility_router
+from app.routers.operations import router as operations_router
 from app.routers.settings import router as settings_router
 from app.routers.system import router as system_router
 from app.routers.telemetry import router as telemetry_router
@@ -800,75 +798,4 @@ app.include_router(settings_router)
 app.include_router(inspections_router)
 app.include_router(telemetry_router)
 app.include_router(analyze_router)
-
-
-@app.get("/dashboard/overview", response_model=DashboardOverviewResponse)
-async def dashboard_overview(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    all_items = (
-        db.query(Inspection)
-        .filter(Inspection.organization_id == current_user.organization_id)
-        .order_by(Inspection.date.desc())
-        .all()
-    )
-    recent = all_items[:10]
-    attention = [item for item in all_items if item.severity in ("medium", "high")][:10]
-
-    avg_health = (
-        int(sum([item.health_score for item in all_items]) / len(all_items))
-        if all_items
-        else 100
-    )
-    health = FleetHealth(
-        score=avg_health,
-        attention_vehicles=len(attention),
-        inspections_today=len(
-            [item for item in all_items if item.date.date() == utc_now().date()]
-        ),
-        active_alerts=len([item for item in all_items if item.severity == "high"]),
-    )
-
-    return DashboardOverviewResponse(
-        fleet_health=health,
-        recent_inspections=[to_history_item(item) for item in recent],
-        vehicles_requiring_attention=[to_history_item(item) for item in attention],
-    )
-
-
-@app.post("/claims/submit", response_model=ClaimSubmitResponse)
-async def submit_claim(
-    payload: ClaimSubmitRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("admin", "manager", "inspector")),
-):
-    inspection = (
-        db.query(Inspection)
-        .filter(
-            Inspection.id == payload.inspection_id,
-            Inspection.organization_id == current_user.organization_id,
-        )
-        .first()
-    )
-    if not inspection:
-        raise HTTPException(status_code=404, detail="Inspection not found")
-
-    claim_id = f"CLM-{uuid.uuid4().hex[:10].upper()}"
-    provider_ref = f"{payload.destination.upper()}-{uuid.uuid4().hex[:8]}"
-    claim = Claim(
-        id=claim_id,
-        inspection_id=inspection.id,
-        organization_id=current_user.organization_id,
-        status="Submitted",
-        provider_ref=provider_ref,
-    )
-    db.add(claim)
-    db.commit()
-
-    return ClaimSubmitResponse(
-        claim_id=claim_id,
-        inspection_id=inspection.id,
-        status="Submitted",
-        provider_reference=provider_ref,
-    )
+app.include_router(operations_router)
