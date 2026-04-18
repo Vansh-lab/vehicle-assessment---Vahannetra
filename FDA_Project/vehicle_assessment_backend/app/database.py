@@ -19,7 +19,10 @@ DATABASE_URL = os.getenv(
 
 def _derive_async_database_url(database_url: str) -> str:
     if database_url.startswith("sqlite:///"):
-        return database_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+        return "sqlite+aiosqlite:///" + database_url[len("sqlite:///") :]
+    if database_url.startswith("postgresql+"):
+        scheme, rest = database_url.split("://", 1)
+        return f"postgresql+asyncpg://{rest}"
     if database_url.startswith("postgresql://"):
         return database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     return database_url
@@ -127,6 +130,15 @@ def set_org_context(db: Session, organization_id: str) -> None:
     if not is_postgres():
         return
     db.execute(
+        text("SELECT set_config('app.current_org_id', :org_id, true)"),
+        {"org_id": organization_id},
+    )
+
+
+async def set_org_context_async(db: AsyncSession, organization_id: str) -> None:
+    if not is_postgres():
+        return
+    await db.execute(
         text("SELECT set_config('app.current_org_id', :org_id, true)"),
         {"org_id": organization_id},
     )

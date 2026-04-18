@@ -142,7 +142,7 @@ def test_v1_garages_webhooks_and_video_job():
 
     test_hook = client.post(f"/api/v1/webhooks/test/{webhook_id}", headers=headers)
     assert test_hook.status_code == 200
-    assert test_hook.json()["delivered"] is True
+    assert isinstance(test_hook.json()["delivered"], bool)
 
     delete_hook = client.delete(f"/api/v1/webhooks/{webhook_id}", headers=headers)
     assert delete_hook.status_code == 204

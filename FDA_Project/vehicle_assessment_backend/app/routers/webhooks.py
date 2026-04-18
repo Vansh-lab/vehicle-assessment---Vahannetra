@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_user_async
 from app.database import get_async_db
 from app.db_models import User, WebhookSubscription
 from app.services.webhook_dispatcher import build_retry_schedule, build_signature
@@ -38,7 +38,7 @@ def isoformat_utc_z(value: datetime) -> str:
 async def v1_register_webhook(
     payload: V1WebhookRegisterRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_async),
 ):
     ensure_public_http_url(payload.target_url)
     webhook = WebhookSubscription(
@@ -62,7 +62,7 @@ async def v1_register_webhook(
 @router.get("")
 async def v1_list_webhooks(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_async),
 ):
     result = await db.execute(
         select(WebhookSubscription)
@@ -88,7 +88,7 @@ async def v1_list_webhooks(
 async def v1_delete_webhook(
     webhook_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_async),
 ):
     result = await db.execute(
         select(WebhookSubscription).where(
@@ -109,7 +109,7 @@ async def v1_delete_webhook(
 async def v1_test_webhook(
     webhook_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_async),
 ):
     result = await db.execute(
         select(WebhookSubscription).where(
@@ -141,7 +141,8 @@ async def v1_test_webhook(
         "webhook_id": webhook.id,
         "signature": signature,
         "payload": payload,
-        "delivered": True,
+        "queued": task_id is not None,
+        "delivered": task_id is not None,
         "task_id": task_id,
         "retry_schedule": [isoformat_utc_z(item.scheduled_at) for item in schedule],
     }

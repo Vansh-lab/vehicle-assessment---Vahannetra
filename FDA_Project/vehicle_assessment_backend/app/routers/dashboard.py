@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_user_async
 from app.database import get_async_db
 from app.db_models import Inspection, InspectionJob, User
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 @router.get("/stats")
 async def v1_dashboard_stats(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_async),
 ):
     inspections_result = await db.execute(
         select(Inspection).where(
@@ -59,7 +59,7 @@ async def v1_dashboard_stats(
 async def v1_dashboard_timeline(
     days: int = Query(default=7, ge=1, le=90),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_async),
 ):
     inspections_result = await db.execute(
         select(Inspection.date).where(
