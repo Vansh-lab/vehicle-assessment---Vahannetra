@@ -6,6 +6,8 @@ import logging
 
 import requests
 
+from app.database import SessionLocal
+from app.db_models import WebhookDeadLetter
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,15 @@ def _build_idempotency_key(target_url: str, payload: dict) -> str:
 
 
 @celery_app.task(bind=True, max_retries=5)
-def deliver_webhook(self, target_url: str, payload: dict, signature: str) -> dict:
+def deliver_webhook(
+    self,
+    target_url: str,
+    payload: dict,
+    signature: str,
+    organization_id: str = "",
+    webhook_id: str = "",
+    event_type: str = "inspection.completed",
+) -> dict:
     idempotency_key = _build_idempotency_key(target_url, payload)
     try:
         response = requests.post(
@@ -41,6 +51,9 @@ def deliver_webhook(self, target_url: str, payload: dict, signature: str) -> dic
         if self.request.retries >= self.max_retries:
             record_webhook_dead_letter.delay(
                 {
+                    "organization_id": organization_id,
+                    "webhook_id": webhook_id,
+                    "event_type": event_type,
                     "target_url": target_url,
                     "payload": payload,
                     "signature": signature,
@@ -56,5 +69,23 @@ def deliver_webhook(self, target_url: str, payload: dict, signature: str) -> dic
 
 @celery_app.task(name="app.tasks.webhooks.record_webhook_dead_letter")
 def record_webhook_dead_letter(event: dict) -> dict:
-    logger.error("webhook_delivery_dead_letter", extra={"event": event})
-    return {"recorded": True, "event": event}
+    db = SessionLocal()
+    try:
+        record = WebhookDeadLetter(
+            organization_id=str(event.get("organization_id", "")),
+            webhook_id=str(event.get("webhook_id", "")),
+            target_url=str(event.get("target_url", "")),
+            event_type=str(event.get("event_type", "inspection.completed")),
+            payload_json=json.dumps(event.get("payload", {})),
+            signature=str(event.get("signature", "")),
+            idempotency_key=str(event.get("idempotency_key", "")),
+            error_message=str(event.get("error", "")),
+            retries=int(event.get("retries", 0)),
+            status="open",
+        )
+        db.add(record)
+        db.commit()
+        logger.error("webhook_delivery_dead_letter", extra={"event": event})
+        return {"recorded": True, "id": record.id, "event": event}
+    finally:
+        db.close()

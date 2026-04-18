@@ -146,6 +146,10 @@ def test_v1_garages_webhooks_and_video_job():
     assert listed.status_code == 200
     assert any(item["id"] == webhook_id for item in listed.json()["items"])
 
+    dlq = client.get("/api/v1/webhooks/dlq", headers=headers)
+    assert dlq.status_code == 200
+    assert isinstance(dlq.json()["items"], list)
+
     test_hook = client.post(f"/api/v1/webhooks/test/{webhook_id}", headers=headers)
     assert test_hook.status_code == 200
     assert isinstance(test_hook.json()["delivered"], bool)

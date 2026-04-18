@@ -246,3 +246,25 @@ class WebhookSubscription(Base):
     secret: Mapped[str] = mapped_column(String(128), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class WebhookDeadLetter(Base):
+    __tablename__ = "webhook_dead_letters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    organization_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    webhook_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    target_url: Mapped[str] = mapped_column(String(1024), default="")
+    event_type: Mapped[str] = mapped_column(String(64), default="inspection.completed")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    signature: Mapped[str] = mapped_column(String(256), default="")
+    idempotency_key: Mapped[str] = mapped_column(String(128), index=True, default="")
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(24), default="open", index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
