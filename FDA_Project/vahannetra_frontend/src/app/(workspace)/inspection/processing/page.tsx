@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { useInspectionStore } from "@/store/inspection-store";
 import { analyzeVideoWithBackend, assessDamageMock, assessDamageWithBackend } from "@/lib/api/services";
+import { env } from "@/lib/env";
 
 const stages = ["Preprocessing image", "Detection", "Classification", "Severity scoring"];
 
 export default function ProcessingPage() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [progress, setProgress] = useState(8);
   const [status, setStatus] = useState<string>(stages[0]);
   const [error, setError] = useState("");
@@ -21,7 +22,7 @@ export default function ProcessingPage() {
 
   useEffect(() => {
     if (!selectedFile) {
-      router.push("/inspection/new");
+      navigate("/inspection/new");
       return;
     }
 
@@ -37,7 +38,7 @@ export default function ProcessingPage() {
 
     const run = async () => {
       try {
-        const response = process.env.NEXT_PUBLIC_USE_BACKEND === "true"
+        const response = env.USE_BACKEND
           ? selectedFile.type.startsWith("video/")
             ? await analyzeVideoWithBackend(selectedFile, payload)
             : await assessDamageWithBackend(selectedFile, payload)
@@ -46,7 +47,7 @@ export default function ProcessingPage() {
         setResult(response);
         setProgress(100);
         setStatus("Analysis complete");
-        setTimeout(() => router.push("/inspection/result"), 700);
+        setTimeout(() => navigate("/inspection/result"), 700);
       } catch {
         if (cancelled) return;
         setError("API failure. Please retry after checking network or backend status.");
@@ -61,7 +62,7 @@ export default function ProcessingPage() {
       cancelled = true;
       clearInterval(ticker);
     };
-  }, [payload, router, selectedFile, setResult]);
+  }, [navigate, payload, selectedFile, setResult]);
 
   return (
     <div className="mx-auto max-w-xl space-y-4 pt-10">

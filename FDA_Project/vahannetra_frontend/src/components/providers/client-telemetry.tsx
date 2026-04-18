@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { API_BASE_URL } from "@/lib/api/client";
+import { env } from "@/lib/env";
 
 async function sendClientError(payload: {
   level: "error" | "warning";
@@ -21,7 +22,7 @@ async function sendClientError(payload: {
       keepalive: true,
     });
   } catch {
-    if (process.env.NODE_ENV !== "production") {
+    if (!env.IS_PRODUCTION) {
       console.warn("Client telemetry send failed");
     }
   }

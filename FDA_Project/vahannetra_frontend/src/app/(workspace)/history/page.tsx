@@ -3,7 +3,7 @@
 import { type MouseEvent, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
-import Link from "next/link";
+import { Link } from "react-router-dom";
 import { downloadInspectionReport, getHistory } from "@/lib/api/services";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/states/empty-state";
 import { ErrorState } from "@/components/states/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useConfirm } from "@/components/providers/confirm-provider";
+import { env } from "@/lib/env";
 
 export default function HistoryPage() {
   const [search, setSearch] = useState("");
@@ -20,7 +21,7 @@ export default function HistoryPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateFilter, setDateFilter] = useState("");
   const { confirm } = useConfirm();
-  const bypassConfirm = process.env.NEXT_PUBLIC_E2E_BYPASS_CONFIRM === "true";
+  const bypassConfirm = env.E2E_BYPASS_CONFIRM;
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["history", search, severityFilter, statusFilter, dateFilter],
@@ -83,7 +84,7 @@ export default function HistoryPage() {
 
       <div className="space-y-3">
         {filtered.map((item) => (
-          <Link key={item.id} href={`/history/${item.id}`}>
+          <Link key={item.id} to={`/history/${item.id}`}>
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>

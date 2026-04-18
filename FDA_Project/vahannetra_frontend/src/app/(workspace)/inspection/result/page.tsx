@@ -21,12 +21,13 @@ import { DamageReport } from "@/components/advanced/DamageReport";
 import { NearbyServices } from "@/components/advanced/NearbyServices";
 import { BeforeAfterSlider } from "@/components/advanced/BeforeAfterSlider";
 import { useConfirm } from "@/components/providers/confirm-provider";
+import { env } from "@/lib/env";
 
 export default function ResultPage() {
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
   const [claimMessage, setClaimMessage] = useState("");
   const { confirm } = useConfirm();
-  const bypassConfirm = process.env.NEXT_PUBLIC_E2E_BYPASS_CONFIRM === "true";
+  const bypassConfirm = env.E2E_BYPASS_CONFIRM;
   const { latestResult } = useInspectionStore();
   const result = latestResult ?? mockInspectionResult;
 

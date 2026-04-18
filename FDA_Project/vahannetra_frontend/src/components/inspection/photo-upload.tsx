@@ -180,7 +180,6 @@ export function PhotoUpload({ file, onFileChange }: PhotoUploadProps) {
 
       {previewUrl ? (
         <div className="mt-4 overflow-hidden rounded-xl border border-white/10">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={previewUrl} alt="inspection preview" className="h-56 w-full object-cover" />
         </div>
       ) : null}

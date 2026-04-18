@@ -21,10 +21,11 @@ import {
   mockRecentInspections,
   mockRiskRanking,
 } from "@/lib/api/mock-data";
+import { env } from "@/lib/env";
 import { delay } from "@/lib/utils";
 import type { HistoryItem } from "@/types/domain";
 
-const USE_BACKEND = process.env.NEXT_PUBLIC_USE_BACKEND === "true";
+const USE_BACKEND = env.USE_BACKEND;
 
 function extractProcessedFilename(processedImagePath: string): string | null {
   const value = processedImagePath.trim().replace(/\/+$/, "");
