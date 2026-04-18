@@ -31,26 +31,12 @@ jobs:
     name: Build and push backend/frontend images
     runs-on: ubuntu-latest
     outputs:
-      deploy_enabled: ${{ steps.eligibility.outputs.deploy_enabled }}
       backend_image: ${{ steps.meta.outputs.backend_image }}
       frontend_image: ${{ steps.meta.outputs.frontend_image }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve deploy eligibility
-        id: eligibility
-        env:
-          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-        run: |
-          if [[ -z "${AWS_ROLE_TO_ASSUME}" ]]; then
-            echo "deploy_enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipping ECS deploy: set AWS_ROLE_TO_ASSUME secret to enable deployment."
-            exit 0
-          fi
-          echo "deploy_enabled=true" >> "$GITHUB_OUTPUT"
-
       - name: Configure AWS credentials
-        if: steps.eligibility.outputs.deploy_enabled == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
@@ -58,11 +44,9 @@ jobs:
 
       - name: Login to Amazon ECR
         id: ecr
-        if: steps.eligibility.outputs.deploy_enabled == 'true'
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build + push backend image
-        if: steps.eligibility.outputs.deploy_enabled == 'true'
         working-directory: FDA_Project/vehicle_assessment_backend
         run: |
           BACKEND_IMAGE=${{ steps.ecr.outputs.registry }}/${{ env.BACKEND_IMAGE_REPO }}:${{ github.sha }}
@@ -71,7 +55,6 @@ jobs:
           echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
 
       - name: Build + push frontend image
-        if: steps.eligibility.outputs.deploy_enabled == 'true'
         working-directory: FDA_Project/vahannetra_frontend
         run: |
           FRONTEND_IMAGE=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE_REPO }}:${{ github.sha }}
@@ -81,7 +64,6 @@ jobs:
 
       - name: Export image metadata
         id: meta
-        if: steps.eligibility.outputs.deploy_enabled == 'true'
         run: |
           echo "backend_image=${BACKEND_IMAGE}" >> $GITHUB_OUTPUT
           echo "frontend_image=${FRONTEND_IMAGE}" >> $GITHUB_OUTPUT
@@ -90,7 +72,6 @@ jobs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
     needs: [build-and-push]
-    if: needs.build-and-push.result == 'success' && needs.build-and-push.outputs.deploy_enabled == 'true'
     outputs:
       previous_backend_taskdef: ${{ steps.capture.outputs.previous_backend_taskdef }}
       previous_frontend_taskdef: ${{ steps.capture.outputs.previous_frontend_taskdef }}
@@ -120,8 +101,7 @@ jobs:
   health-gates:
     name: Health gates + timed perf evidence
     runs-on: ubuntu-latest
-    needs: [build-and-push, deploy]
-    if: needs.build-and-push.outputs.deploy_enabled == 'true' && needs.deploy.result == 'success'
+    needs: [deploy]
     steps:
       - name: Run 8-service timed checks and health gates
         shell: bash
@@ -170,7 +150,7 @@ jobs:
   rollback-on-failure:
     name: Rollback on failed health gates
     runs-on: ubuntu-latest
-    if: failure() && needs.deploy.result == 'success'
+    if: ${{ failure() && needs.deploy.result == 'success' }}
     needs: [deploy, health-gates]
     steps:
       - name: Configure AWS credentials
