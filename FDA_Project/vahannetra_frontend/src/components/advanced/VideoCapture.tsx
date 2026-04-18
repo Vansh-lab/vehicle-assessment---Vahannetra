@@ -5,12 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 interface VideoCaptureProps {
-  onCapture: (file: File) => void;
+  onVideoReady?: (blob: Blob) => void;
+  onCapture?: (file: File) => void;
 }
 
 type PermissionState = "idle" | "requesting" | "granted" | "denied";
 
-export function VideoCapture({ onCapture }: VideoCaptureProps) {
+export function VideoCapture({ onVideoReady, onCapture }: VideoCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -90,8 +91,7 @@ export function VideoCapture({ onCapture }: VideoCaptureProps) {
       const blob = new Blob(chunksRef.current, { type: mimeType });
       setVideoBlob(blob);
       clearPreview();
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
+      setPreviewUrl(URL.createObjectURL(blob));
       setStopped(true);
     };
     recorder.start(100);
@@ -117,9 +117,14 @@ export function VideoCapture({ onCapture }: VideoCaptureProps) {
 
   const useRecordedVideo = useCallback(() => {
     if (!videoBlob) return;
-    const file = new File([videoBlob], `capture-${Date.now()}.webm`, { type: videoBlob.type || "video/webm" });
-    onCapture(file);
-  }, [onCapture, videoBlob]);
+    onVideoReady?.(videoBlob);
+    if (onCapture) {
+      const file = new File([videoBlob], `capture-${Date.now()}.webm`, {
+        type: videoBlob.type || "video/webm",
+      });
+      onCapture(file);
+    }
+  }, [onCapture, onVideoReady, videoBlob]);
 
   const reRecord = useCallback(() => {
     setVideoBlob(null);
@@ -156,7 +161,9 @@ export function VideoCapture({ onCapture }: VideoCaptureProps) {
             accept="video/mp4,video/webm,video/quicktime"
             onChange={(event) => {
               const picked = event.target.files?.[0];
-              if (picked) onCapture(picked);
+              if (!picked) return;
+              onVideoReady?.(picked);
+              onCapture?.(picked);
             }}
           />
         </div>
@@ -203,3 +210,6 @@ export function VideoCapture({ onCapture }: VideoCaptureProps) {
     </Card>
   );
 }
+
+
+export default VideoCapture;

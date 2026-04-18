@@ -1,0 +1,155 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgis/postgis:15-3.3
+    environment:
+      POSTGRES_USER: vahannetra
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: vahannetra_db
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vahannetra -d vahannetra_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - vahannetra_network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+    networks:
+      - vahannetra_network
+
+  api:
+    build:
+      context: ./vehicle_assessment_backend
+    environment:
+      VAHANNETRA_DATABASE_URL: postgresql://vahannetra:password@postgres:5432/vahannetra_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      VAHANNETRA_S3_BUCKET: vahannetra-images
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./vehicle_assessment_backend:/app
+      - model_weights:/app/ml/weights
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - vahannetra_network
+
+  worker:
+    build:
+      context: ./vehicle_assessment_backend
+    command: celery -A app.tasks.celery_app.celery_app worker --loglevel=INFO
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      VAHANNETRA_DATABASE_URL: postgresql://vahannetra:password@postgres:5432/vahannetra_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./vehicle_assessment_backend:/app
+      - model_weights:/app/ml/weights
+    networks:
+      - vahannetra_network
+
+  beat:
+    build:
+      context: ./vehicle_assessment_backend
+    command: celery -A app.tasks.celery_app.celery_app beat --loglevel=INFO
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      VAHANNETRA_DATABASE_URL: postgresql://vahannetra:password@postgres:5432/vahannetra_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./vehicle_assessment_backend:/app
+    networks:
+      - vahannetra_network
+
+  flower:
+    image: mher/flower:2.0
+    command: ["celery", "--broker=redis://redis:6379/0", "flower", "--port=5555"]
+    ports:
+      - "5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - vahannetra_network
+
+  pgadmin:
+    image: dpage/pgadmin4:8.10
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@vahannetra.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - vahannetra_network
+
+  frontend:
+    build:
+      context: ./vahannetra_frontend
+    environment:
+      VITE_API_BASE_URL: http://api:8000
+      VITE_USE_BACKEND: "true"
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - vahannetra_network
+
+  nginx:
+    image: nginx:1.27-alpine
+    profiles: ["production"]
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_started
+      frontend:
+        condition: service_started
+    networks:
+      - vahannetra_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  model_weights:
+
+networks:
+  vahannetra_network:
+    name: vahannetra_network

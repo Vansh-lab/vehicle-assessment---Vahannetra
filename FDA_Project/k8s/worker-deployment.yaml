@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vahannetra-worker
+  namespace: vahannetra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vahannetra-worker
+  template:
+    metadata:
+      labels:
+        app: vahannetra-worker
+    spec:
+      containers:
+        - name: worker
+          image: vahannetra-backend:latest
+          command: ["celery", "-A", "app.tasks.celery_app.celery_app", "worker", "--loglevel=INFO"]
+          env:
+            - name: REDIS_URL
+              value: redis://vahannetra-redis:6379/0
+            - name: CELERY_BROKER_URL
+              value: redis://vahannetra-redis:6379/0
