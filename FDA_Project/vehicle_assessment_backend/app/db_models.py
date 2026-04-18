@@ -44,7 +44,9 @@ class RefreshToken(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
@@ -55,7 +57,9 @@ class OtpCode(Base):
     email: Mapped[str] = mapped_column(String(320), index=True)
     code_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     purpose: Mapped[str] = mapped_column(String(40), default="forgot_password")
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     used: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
