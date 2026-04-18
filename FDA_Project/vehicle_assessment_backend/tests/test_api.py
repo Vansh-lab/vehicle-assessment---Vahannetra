@@ -1,16 +1,22 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.database import async_engine
 from app.main import app, init_seed_data
+
+
+@pytest.fixture(scope="session", autouse=True)
+def seed_data_once() -> None:
+    init_seed_data()
 
 
 @pytest.fixture
 async def client() -> AsyncClient:
-    init_seed_data()
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as test_client:
         yield test_client
+    await async_engine.dispose()
 
 
 async def test_login_and_dashboard_access(client: AsyncClient):
