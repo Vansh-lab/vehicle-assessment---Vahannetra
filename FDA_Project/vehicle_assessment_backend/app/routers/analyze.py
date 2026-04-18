@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import hmac
 import json
 import os
 import uuid
@@ -16,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user_async
 from app.database import get_async_db
 from app.db_models import InspectionJob, User
-from app.secrets import get_secret
 from app.services.detector import DamageDetector
 from app.services.dsq_v2 import compute_dsq_v2
 from app.services.storage import ArtifactStorageService
@@ -54,6 +52,8 @@ def extension_for_content_type(content_type: str | None, fallback: str = ".bin")
         return ".mp4"
     if content_type == "video/webm":
         return ".webm"
+    if content_type in {"video/quicktime", "video/mov"}:
+        return ".mov"
     return fallback
 
 
@@ -109,6 +109,46 @@ def _read_bytes(path: Path) -> bytes:
         return input_file.read()
 
 
+def _box_iou(a: list[float], b: list[float]) -> float:
+    if len(a) < 4 or len(b) < 4:
+        return 0.0
+    ax1, ay1, ax2, ay2 = [float(v) for v in a[:4]]
+    bx1, by1, bx2, by2 = [float(v) for v in b[:4]]
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+    inter_w = max(0.0, inter_x2 - inter_x1)
+    inter_h = max(0.0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union = area_a + area_b - inter_area
+    return inter_area / union if union > 0 else 0.0
+
+
+def _fuse_detections_with_nms(detections: list[dict], iou_threshold: float = 0.45) -> list[dict]:
+    if not detections:
+        return []
+    sorted_dets = sorted(detections, key=lambda d: float(d.get("confidence", 0.0)), reverse=True)
+    kept: list[dict] = []
+    for det in sorted_dets:
+        det_class = str(det.get("class") or det.get("type") or "").strip().lower()
+        det_box = det.get("box") or []
+        should_keep = True
+        for existing in kept:
+            existing_class = str(existing.get("class") or existing.get("type") or "").strip().lower()
+            if existing_class != det_class:
+                continue
+            iou = _box_iou(existing.get("box") or [], det_box)
+            if iou >= iou_threshold:
+                should_keep = False
+                break
+        if should_keep:
+            kept.append(det)
+    return kept
+
+
 async def create_job_from_findings_async(
     db: AsyncSession,
     organization_id: str,
@@ -122,12 +162,20 @@ async def create_job_from_findings_async(
     dsq_result = compute_dsq_v2(findings, (720, 1280, 3))
     score = dsq_result.score
     severity = dsq_result.overall_severity
-    hash_payload = f"{organization_id}:{score}:{utc_now().isoformat()}"
-    hash_secret_key = (
-        get_secret("VAHANNETRA_HASH_SECRET", "vahannetra-hash-secret") or ""
-    ).encode("utf-8")
-    hash_value = hmac.new(
-        hash_secret_key, hash_payload.encode("utf-8"), hashlib.sha256
+
+    metadata_payload = {
+        "organization_id": organization_id,
+        "input_type": input_type,
+        "image_keys": image_keys or [],
+        "video_key": video_key,
+        "annotated_key": annotated_key,
+        "score": score,
+        "severity": severity,
+        "findings_count": len(findings),
+        "generated_at": utc_now().isoformat(),
+    }
+    hash_value = hashlib.sha256(
+        json.dumps(metadata_payload, sort_keys=True).encode("utf-8")
     ).hexdigest()
 
     job = InspectionJob(
@@ -183,16 +231,19 @@ async def v1_analyze(
         file_path = UPLOAD_DIR / safe_name
         await asyncio.to_thread(_write_bytes, file_path, payload)
         image_keys.append(f"uploads/{safe_name}")
+
+        frame_detections, processed_img_path = await asyncio.to_thread(
+            detector.analyze_vehicle, str(file_path)
+        )
+        detections.extend(frame_detections)
         if index == 0:
-            detections, processed_img_path = await asyncio.to_thread(
-                detector.analyze_vehicle, str(file_path)
-            )
             annotated = f"uploads/{Path(processed_img_path).name}"
 
+    fused = _fuse_detections_with_nms(detections)
     job = await create_job_from_findings_async(
         db,
         current_user.organization_id,
-        detections,
+        fused,
         input_type="multi" if len(files) > 1 else "photo",
         annotated_key=annotated,
         image_keys=image_keys,
@@ -235,11 +286,9 @@ async def v1_analyze_video(
     await asyncio.to_thread(_validate_video_upload, file, payload)
 
     job_id = f"JOB-{uuid.uuid4().hex[:12].upper()}"
-    safe_name = (
-        f"{job_id}_input"
-        f"{extension_for_content_type(file.content_type, fallback='.webm')}"
-    )
-    file_path = UPLOAD_DIR / safe_name
+    input_ext = extension_for_content_type(file.content_type, fallback=".webm")
+    local_video_name = f"{job_id}_input{input_ext}"
+    file_path = UPLOAD_DIR / local_video_name
     await asyncio.to_thread(_write_bytes, file_path, payload)
 
     frames_dir = UPLOAD_DIR / f"{job_id}_frames"
@@ -267,10 +316,10 @@ async def v1_analyze_video(
         if not annotated_output and frame_annotated_path:
             annotated_output = frame_annotated_path
 
-    video_key = (
-        f"jobs/{job_id}/input_video"
-        f"{extension_for_content_type(file.content_type, fallback='.webm')}"
-    )
+    fused = _fuse_detections_with_nms(detections)
+
+    # Fixed key contract from spec
+    video_key = f"jobs/{job_id}/input_video.mp4"
     await storage_service.upload_bytes(
         video_key, payload, file.content_type or "video/webm"
     )
@@ -289,7 +338,7 @@ async def v1_analyze_video(
     job = await create_job_from_findings_async(
         db,
         current_user.organization_id,
-        detections,
+        fused,
         input_type="video",
         annotated_key=f"jobs/{job_id}/annotated.jpg" if annotated_output else "",
         image_keys=frame_keys,

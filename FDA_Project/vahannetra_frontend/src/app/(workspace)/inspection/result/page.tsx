@@ -135,7 +135,7 @@ export default function ResultPage() {
         <PartGraph items={partGraphData} />
       </div>
 
-      <BeforeAfterSlider beforeUrl="/favicon.ico" afterUrl={result.processedImageUrl} />
+      <BeforeAfterSlider beforeUrl="/favicon.ico" afterUrl={result.processedImageUrl} beforeScore={100} afterScore={result.healthScore} />
 
       <NearbyServices
         items={garagesQuery.data ?? []}

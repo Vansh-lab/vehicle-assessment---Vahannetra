@@ -24,7 +24,7 @@ export default function AdvancedInspectionPage() {
         <PartGraph items={Object.entries(grouped).map(([part, impact]) => ({ part, impact }))} />
       </div>
       <div className="space-y-3">
-        <BeforeAfterSlider beforeUrl={result.processedImageUrl} afterUrl={result.processedImageUrl} />
+        <BeforeAfterSlider beforeUrl={result.processedImageUrl} afterUrl={result.processedImageUrl} beforeScore={100} afterScore={result.healthScore} />
         <CarHeatmap findings={result.findings} />
         <NearbyServices
           items={[

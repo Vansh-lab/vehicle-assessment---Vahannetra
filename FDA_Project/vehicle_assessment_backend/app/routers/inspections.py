@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import re
 import uuid
@@ -337,6 +338,19 @@ async def download_report(
         raise HTTPException(status_code=404, detail="Inspection not found")
 
     detail = to_inspection_detail(record)
+    blockchain_payload = {
+        "inspection_id": detail.inspection_id,
+        "plate": detail.vehicle.plate,
+        "model": detail.vehicle.model,
+        "inspected_at": detail.vehicle.inspected_at,
+        "health_score": detail.health_score,
+        "triage_category": detail.triage_category,
+        "findings": [item.model_dump() for item in detail.findings],
+    }
+    blockchain_hash = hashlib.sha256(
+        json.dumps(blockchain_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
     pdf_bytes = render_inspection_report(
         {
             "inspection_id": detail.inspection_id,
@@ -344,6 +358,7 @@ async def download_report(
             "health_score": detail.health_score,
             "triage_category": detail.triage_category,
             "findings": [item.model_dump() for item in detail.findings],
+            "blockchain_hash": blockchain_hash,
         }
     )
 
@@ -352,8 +367,7 @@ async def download_report(
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="{inspection_id}.pdf"',
-            "X-Report-Signature": hash_secret(
-                inspection_id + str(record.date.timestamp())
-            ),
+            "X-Report-Signature": hash_secret(inspection_id + str(record.date.timestamp())),
+            "X-Blockchain-Hash": blockchain_hash,
         },
     )
