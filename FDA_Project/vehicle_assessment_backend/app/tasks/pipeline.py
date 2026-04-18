@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+
 PIPELINE_STEPS = [
     "validate_input",
     "normalize_media",
@@ -28,6 +29,4 @@ class PipelineExecution:
 
 
 def start_pipeline(job_id: str) -> PipelineExecution:
-    return PipelineExecution(
-        job_id=job_id, current_step=PIPELINE_STEPS[0], status="queued"
-    )
+    return PipelineExecution(job_id=job_id, current_step=PIPELINE_STEPS[0], status="queued")
