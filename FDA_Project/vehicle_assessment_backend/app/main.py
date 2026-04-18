@@ -4,7 +4,6 @@ import hashlib
 import math
 import os
 import random
-import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -13,22 +12,19 @@ from typing import Literal, Optional
 
 import cv2
 import numpy as np
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import (
     get_current_user,
     hash_password,
-    hash_secret,
     require_roles,
 )
 from app.database import Base, apply_rls_policies, engine, get_db
 from app.db_models import (
     Claim,
-    ClientErrorEvent,
     Garage,
     InsuranceCenter,
     Inspection,
@@ -38,24 +34,23 @@ from app.db_models import (
     User,
     Vehicle,
 )
-from app.pdf_reports import render_inspection_report
 from app.core.settings import settings
 from app.middleware.request_context import request_context_middleware
 from app.routers.analytics import router as analytics_router
+from app.routers.analyze import router as analyze_router
 from app.routers.auth import router as auth_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.health import router as health_router
+from app.routers.inspections import router as inspections_router
 from app.routers.mobility import router as mobility_router
 from app.routers.settings import router as settings_router
 from app.routers.system import router as system_router
+from app.routers.telemetry import router as telemetry_router
 from app.routers.webhooks import router as webhooks_router
 from app.secrets import get_secret
 from app.services.detector import DamageDetector
 from app.services.dsq_v2 import compute_dsq_v2
 from app.services.storage import ArtifactStorageService
-from app.services.video_processing import extract_best_frames
-from app.utils.assessment import calculate_dsi
-from app.utils.network import ensure_public_http_url
 
 detector = DamageDetector()
 storage_service = ArtifactStorageService()
@@ -802,6 +797,9 @@ app.include_router(mobility_router)
 app.include_router(auth_router)
 app.include_router(analytics_router)
 app.include_router(settings_router)
+app.include_router(inspections_router)
+app.include_router(telemetry_router)
+app.include_router(analyze_router)
 
 
 @app.get("/dashboard/overview", response_model=DashboardOverviewResponse)
@@ -839,182 +837,6 @@ async def dashboard_overview(
     )
 
 
-@app.post("/assess-damage/")
-async def assess_damage(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    payload = await file.read()
-    validate_upload(file, payload)
-
-    base_name = Path(file.filename or "upload").name
-    sanitized_name = re.sub(r"[^A-Za-z0-9._-]", "_", base_name)
-    safe_name = f"{uuid.uuid4().hex}_{sanitized_name}"
-    file_path = UPLOAD_DIR / safe_name
-    with open(file_path, "wb") as output_file:
-        output_file.write(payload)
-
-    raw_detections, processed_img_path = detector.analyze_vehicle(str(file_path))
-
-    image = cv2.imread(str(file_path))
-    dsi_score = calculate_dsi(raw_detections, image.shape) if image is not None else 0
-    triage_category = "COSMETIC" if dsi_score < 40 else "STRUCTURAL/FUNCTIONAL"
-    severity = map_severity(dsi_score)
-
-    finding_models = [
-        finding_from_detection(
-            index=index, det=det, severity=severity, triage_category=triage_category
-        )
-        for index, det in enumerate(raw_detections)
-    ]
-
-    inspection_id = f"INSP-{int(utc_now().timestamp())}-{uuid.uuid4().hex[:6]}"
-    inspection = Inspection(
-        id=inspection_id,
-        organization_id=current_user.organization_id,
-        plate="Unknown",
-        model="Unknown",
-        vin=None,
-        vehicle_type="4W",
-        date=utc_now(),
-        severity=severity,
-        status="Completed",
-        risk_score=min(100, int(dsi_score)),
-        health_score=max(0, 100 - int(dsi_score)),
-        triage_category=triage_category,
-        processed_image_url=f"uploads/{Path(processed_img_path).name}",
-        findings_json=json.dumps([finding.model_dump() for finding in finding_models]),
-    )
-    db.add(inspection)
-    db.commit()
-
-    return {
-        "inspection_summary": {
-            "dsi_score": dsi_score,
-            "overall_severity": "High" if dsi_score > 60 else "Moderate",
-            "triage_category": triage_category,
-        },
-        "inspection_id": inspection_id,
-        "processed_image_url": f"uploads/{Path(processed_img_path).name}",
-        "findings": raw_detections,
-    }
-
-
-@app.get("/view-result/{filename}")
-async def get_result_image(
-    filename: str, current_user: User = Depends(get_current_user)
-):
-    _ = current_user
-    if not filename or "/" in filename or "\\" in filename or filename in {".", ".."}:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    file_path = next(
-        (
-            candidate
-            for candidate in UPLOAD_DIR.iterdir()
-            if candidate.is_file() and candidate.name == filename
-        ),
-        None,
-    )
-
-    if file_path:
-        return FileResponse(file_path.resolve())
-    raise HTTPException(status_code=404, detail="File not found")
-
-
-@app.get("/inspections", response_model=list[InspectionHistoryItem])
-async def list_inspections(
-    search: Optional[str] = Query(default=None),
-    severity: Optional[SeverityLevel] = Query(default=None),
-    status: Optional[InspectionStatus] = Query(default=None),
-    date: Optional[str] = Query(default=None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    query = db.query(Inspection).filter(
-        Inspection.organization_id == current_user.organization_id
-    )
-
-    if search:
-        search_value = f"%{search.lower()}%"
-        query = query.filter(
-            (Inspection.plate.ilike(search_value))
-            | (Inspection.model.ilike(search_value))
-        )
-
-    if severity:
-        query = query.filter(Inspection.severity == severity)
-
-    if status:
-        query = query.filter(Inspection.status == status)
-
-    records = query.order_by(Inspection.date.desc()).all()
-    if date:
-        records = [item for item in records if item.date.date().isoformat() == date]
-
-    return [to_history_item(item) for item in records]
-
-
-@app.get("/inspections/{inspection_id}", response_model=InspectionDetail)
-async def get_inspection_detail(
-    inspection_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    record = (
-        db.query(Inspection)
-        .filter(
-            Inspection.id == inspection_id,
-            Inspection.organization_id == current_user.organization_id,
-        )
-        .first()
-    )
-    if not record:
-        raise HTTPException(status_code=404, detail="Inspection not found")
-    return to_inspection_detail(record)
-
-
-@app.get("/inspections/{inspection_id}/report.pdf")
-async def download_report(
-    inspection_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    record = (
-        db.query(Inspection)
-        .filter(
-            Inspection.id == inspection_id,
-            Inspection.organization_id == current_user.organization_id,
-        )
-        .first()
-    )
-    if not record:
-        raise HTTPException(status_code=404, detail="Inspection not found")
-
-    detail = to_inspection_detail(record)
-    pdf_bytes = render_inspection_report(
-        {
-            "inspection_id": detail.inspection_id,
-            "vehicle": detail.vehicle.model_dump(),
-            "health_score": detail.health_score,
-            "triage_category": detail.triage_category,
-            "findings": [item.model_dump() for item in detail.findings],
-        }
-    )
-
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{inspection_id}.pdf"',
-            "X-Report-Signature": hash_secret(
-                inspection_id + str(record.date.timestamp())
-            ),
-        },
-    )
-
-
 @app.post("/claims/submit", response_model=ClaimSubmitResponse)
 async def submit_claim(
     payload: ClaimSubmitRequest,
@@ -1049,160 +871,4 @@ async def submit_claim(
         inspection_id=inspection.id,
         status="Submitted",
         provider_reference=provider_ref,
-    )
-
-
-@app.post("/telemetry/client-error")
-async def record_client_error(
-    payload: ClientErrorPayload,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    event = ClientErrorEvent(
-        organization_id=current_user.organization_id,
-        level=payload.level,
-        message=payload.message[:1000],
-        source=(payload.source or "")[:255],
-        stack=(payload.stack or "")[:10000],
-        route=(payload.route or "")[:255],
-        user_agent=(payload.user_agent or "")[:500],
-    )
-    db.add(event)
-    db.commit()
-    return {"ok": True}
-
-
-@app.post("/api/v1/analyze", status_code=202, response_model=V1AnalyzeAccepted)
-async def v1_analyze(
-    files: list[UploadFile] = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    if len(files) < 1 or len(files) > 10:
-        raise HTTPException(status_code=400, detail="Upload between 1 and 10 images")
-
-    detections: list[dict] = []
-    image_keys: list[str] = []
-    annotated = ""
-    for index, file in enumerate(files):
-        payload = await file.read()
-        validate_upload(file, payload)
-        safe_name = f"img_{uuid.uuid4().hex}{extension_for_content_type(file.content_type, fallback='.jpg')}"
-        file_path = UPLOAD_DIR / safe_name
-        with open(file_path, "wb") as output_file:
-            output_file.write(payload)
-        image_keys.append(f"uploads/{safe_name}")
-        if index == 0:
-            detections, processed_img_path = detector.analyze_vehicle(str(file_path))
-            annotated = f"uploads/{Path(processed_img_path).name}"
-
-    job = create_job_from_findings(
-        db,
-        current_user.organization_id,
-        detections,
-        input_type="multi" if len(files) > 1 else "photo",
-        annotated_key=annotated,
-        image_keys=image_keys,
-        status="completed",
-    )
-    return V1AnalyzeAccepted(
-        job_id=job.id, status="queued", message="Analysis accepted"
-    )
-
-
-@app.post("/api/v1/analyze/url", status_code=202, response_model=V1AnalyzeAccepted)
-async def v1_analyze_url(
-    image_url: str = Query(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    ensure_public_http_url(image_url)
-
-    job = create_job_from_findings(
-        db,
-        current_user.organization_id,
-        [],
-        input_type="photo",
-        annotated_key="",
-        image_keys=[image_url],
-        status="queued",
-    )
-    return V1AnalyzeAccepted(
-        job_id=job.id, status="queued", message="URL analysis accepted"
-    )
-
-
-@app.post("/api/v1/analyze/video", status_code=202, response_model=V1AnalyzeAccepted)
-async def v1_analyze_video(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    payload = await file.read()
-    validate_video_upload(file, payload)
-
-    job_id = f"JOB-{uuid.uuid4().hex[:12].upper()}"
-    safe_name = f"{job_id}_input{extension_for_content_type(file.content_type, fallback='.webm')}"
-    file_path = UPLOAD_DIR / safe_name
-    with open(file_path, "wb") as output_file:
-        output_file.write(payload)
-
-    frames_dir = UPLOAD_DIR / f"{job_id}_frames"
-    extraction = extract_best_frames(
-        file_path, frames_dir, n_frames=6, sharpness_threshold=100.0
-    )
-    estimated_seconds = max(3, min(120, extraction.duration_seconds + 4))
-
-    frame_keys: list[str] = []
-    detections: list[dict] = []
-    annotated_output = ""
-    for index, frame in enumerate(extraction.extracted_frames, start=1):
-        frame_key = f"jobs/{job_id}/frame_{index}.jpg"
-        frame_keys.append(frame_key)
-        try:
-            with open(frame.frame_path, "rb") as frame_file:
-                await storage_service.upload_bytes(
-                    frame_key, frame_file.read(), "image/jpeg"
-                )
-        except OSError:
-            pass
-
-        frame_detections, frame_annotated_path = detector.analyze_vehicle(
-            str(frame.frame_path)
-        )
-        detections.extend(frame_detections)
-        if not annotated_output and frame_annotated_path:
-            annotated_output = frame_annotated_path
-
-    video_key = f"jobs/{job_id}/input_video{extension_for_content_type(file.content_type, fallback='.webm')}"
-    await storage_service.upload_bytes(
-        video_key, payload, file.content_type or "video/webm"
-    )
-
-    if annotated_output:
-        try:
-            with open(annotated_output, "rb") as annotated_file:
-                await storage_service.upload_bytes(
-                    f"jobs/{job_id}/annotated.jpg",
-                    annotated_file.read(),
-                    "image/jpeg",
-                )
-        except OSError:
-            pass
-
-    job = create_job_from_findings(
-        db,
-        current_user.organization_id,
-        detections,
-        input_type="video",
-        annotated_key=f"jobs/{job_id}/annotated.jpg" if annotated_output else "",
-        image_keys=frame_keys,
-        video_key=video_key,
-        status="completed",
-    )
-    return V1AnalyzeAccepted(
-        job_id=job.id,
-        status="queued",
-        message="Video analysis accepted",
-        estimated_seconds=estimated_seconds,
     )
