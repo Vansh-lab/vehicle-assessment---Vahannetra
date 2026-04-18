@@ -8,6 +8,7 @@ import { DamageReport } from "@/components/advanced/DamageReport";
 import { PartGraph } from "@/components/advanced/PartGraph";
 import { NearbyServices } from "@/components/advanced/NearbyServices";
 import { BeforeAfterSlider } from "@/components/advanced/BeforeAfterSlider";
+import { GeoVoiceReportPanel } from "@/components/advanced/GeoVoiceReportPanel";
 
 export default function AdvancedInspectionPage() {
   const result = mockInspectionResult;
@@ -69,8 +70,16 @@ export default function AdvancedInspectionPage() {
       </div>
       <div className="space-y-3">
         <DamageReport findings={result.findings} />
+        <GeoVoiceReportPanel
+          findings={result.findings}
+          triageCategory={result.triageCategory}
+          healthScore={result.healthScore}
+        />
         <Card>
-          <p className="text-sm text-slate-300">3-panel inspector workspace scaffold (left insights, center visuals, right report).</p>
+          <p className="text-sm text-slate-300">
+            3-panel inspector workspace now includes map/GPS, reverse-geocode,
+            jsPDF export and voice controls.
+          </p>
         </Card>
       </div>
     </div>
