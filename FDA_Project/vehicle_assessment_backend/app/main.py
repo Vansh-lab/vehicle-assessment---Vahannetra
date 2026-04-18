@@ -1,8 +1,13 @@
 import json
 import hmac
+import hashlib
+import math
 import os
 import random
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -15,6 +20,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Uploa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth import (
@@ -31,13 +37,18 @@ from app.database import Base, apply_rls_policies, engine, get_db
 from app.db_models import (
     Claim,
     ClientErrorEvent,
+    Garage,
+    InsuranceCenter,
     Inspection,
+    InspectionJob,
     Organization,
     OtpCode,
     OtpDeliveryEvent,
     RefreshToken,
     Setting,
     User,
+    Vehicle,
+    WebhookSubscription,
 )
 from app.otp_provider import get_otp_provider
 from app.pdf_reports import render_inspection_report
@@ -197,6 +208,30 @@ class ClientErrorPayload(BaseModel):
     user_agent: str | None = None
 
 
+class V1AnalyzeAccepted(BaseModel):
+    job_id: str
+    status: str
+    message: str
+
+
+class V1VehicleCreateRequest(BaseModel):
+    number_plate: str
+    vin: Optional[str] = None
+    vehicle_type: str = "4W"
+    make: str = "Unknown"
+    model: str = "Unknown"
+    year: int = 2020
+    fuel_type: str = "Petrol"
+    is_ev: bool = False
+    rto: str = "Unknown"
+
+
+class V1WebhookRegisterRequest(BaseModel):
+    target_url: str
+    event_type: str = "inspection.completed"
+    secret: Optional[str] = None
+
+
 class AuthResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -234,6 +269,101 @@ def finding_from_detection(index: int, det: dict, severity: SeverityLevel, triag
         explainability=f"Detected {det.get('class', 'damage')} based on contour/texture anomalies.",
         box=[float(x) for x in det.get("box", [0, 0, 0, 0])],
     )
+
+
+def dsq_breakdown(score: float) -> dict[str, float]:
+    normalized = max(0.0, min(100.0, score)) / 100.0
+    return {
+        "area_ratio": round(normalized * 0.30, 4),
+        "part_criticality": round(normalized * 0.35, 4),
+        "functional_impact": round(normalized * 0.25, 4),
+        "confidence": round(normalized * 0.10, 4),
+    }
+
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
+    a = math.sin(d_phi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(d_lambda / 2) ** 2
+    return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def smart_score(distance_km: float, rating: float, is_open: bool, services_count: int) -> float:
+    distance_component = 1 / max(distance_km, 0.1)
+    return round(
+        0.4 * distance_component + 0.3 * (rating / 5) + 0.2 * (1 if is_open else 0) + 0.1 * (services_count / 5),
+        4,
+    )
+
+
+def make_demo_vehicle(plate_or_vin: str) -> dict:
+    catalog = [
+        ("Maruti", "Baleno", "Petrol", False),
+        ("Hyundai", "Creta", "Diesel", False),
+        ("Tata", "Nexon EV", "Electric", True),
+        ("Honda", "City", "Petrol", False),
+        ("Mahindra", "XUV700", "Diesel", False),
+    ]
+    make, model, fuel_type, is_ev = random.choice(catalog)
+    year = random.randint(2018, 2025)
+    return {
+        "number_plate": plate_or_vin if len(plate_or_vin) <= 12 else f"MH{random.randint(10, 50)}AB{random.randint(1000, 9999)}",
+        "vin": plate_or_vin if len(plate_or_vin) >= 17 else f"MA1{uuid.uuid4().hex[:14].upper()}",
+        "vehicle_type": "4W",
+        "make": make,
+        "model": model,
+        "year": year,
+        "fuel_type": fuel_type,
+        "is_ev": is_ev,
+        "rto": random.choice(["MH12", "KA03", "DL01", "GJ05", "UP14"]),
+        "rc_valid_until": isoformat_utc_z(utc_now() + timedelta(days=random.randint(250, 1400))),
+        "insurance_valid_until": isoformat_utc_z(utc_now() + timedelta(days=random.randint(60, 365))),
+        "previous_claim_count": random.randint(0, 3),
+        "blacklist_status": "Not Blacklisted",
+        "source": "VAHAN API (Demo)",
+    }
+
+
+def create_job_from_findings(
+    db: Session,
+    organization_id: str,
+    findings: list[dict],
+    input_type: str,
+    annotated_key: str,
+    image_keys: list[str] | None = None,
+    video_key: str = "",
+    status: str = "completed",
+) -> InspectionJob:
+    score = float(calculate_dsi(findings, (720, 1280, 3))) if findings else 0.0
+    severity = "high" if score >= 67 else "medium" if score >= 34 else "low"
+    job = InspectionJob(
+        id=f"JOB-{uuid.uuid4().hex[:12].upper()}",
+        organization_id=organization_id,
+        status=status,
+        input_type=input_type,
+        s3_image_keys=json.dumps(image_keys or []),
+        s3_video_key=video_key,
+        s3_annotated_key=annotated_key,
+        dsq_score=round(score, 2),
+        dsq_breakdown=json.dumps(dsq_breakdown(score)),
+        overall_severity=severity,
+        confidence_overall=round(max([float(item.get("confidence", 0.0)) for item in findings], default=0.0), 4),
+        fraud_risk_score=round(min(100.0, score * 0.6), 2),
+        fraud_flags=json.dumps([]),
+        auto_approve=score < 45,
+        repair_cost_min_inr=2000 if score < 34 else 8000 if score < 67 else 20000,
+        repair_cost_max_inr=7000 if score < 34 else 22000 if score < 67 else 55000,
+        recommendation="Proceed with repair estimate and insurer review.",
+        insurance_claim_steps="Upload RC, policy, and inspection images. Submit claim and await surveyor review.",
+        blockchain_hash=hashlib.sha256(f"{organization_id}:{score}:{utc_now().isoformat()}".encode("utf-8")).hexdigest(),
+        completed_at=utc_now() if status == "completed" else None,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
 
 
 def validate_upload(file: UploadFile, payload: bytes) -> None:
@@ -314,99 +444,212 @@ def init_seed_data() -> None:
     apply_rls_policies()
     db = next(get_db())
     try:
-        if db.query(Organization).count() > 0:
-            return
+        org = db.query(Organization).filter(Organization.id == "org_001").first()
+        if not org:
+            org = Organization(id="org_001", name="Acme Claims Pvt Ltd", region="Mumbai", active_inspectors=42)
+            db.add(org)
+            db.commit()
 
-        org = Organization(id="org_001", name="Acme Claims Pvt Ltd", region="Mumbai", active_inspectors=42)
-        admin = User(
-            id="usr_001",
-            email="ops@insurer.com",
-            name="Field Inspector",
-            role="admin",
-            password_hash=hash_password("password123"),
-            organization_id=org.id,
-        )
-        setting = Setting(organization_id=org.id, push=True, email=True, critical_only=False, theme="dark")
-
-        sample_inspections = [
-            Inspection(
-                id="INSP-1021",
+        if not db.query(User).filter(User.email == "ops@insurer.com").first():
+            admin = User(
+                id="usr_001",
+                email="ops@insurer.com",
+                name="Field Inspector",
+                role="admin",
+                password_hash=hash_password("password123"),
                 organization_id=org.id,
-                plate="MH12AB9087",
-                model="Hyundai i20",
-                vin="MA3EHKD17A1234567",
-                vehicle_type="4W",
-                date=utc_now() - timedelta(hours=8),
-                severity="medium",
-                status="Completed",
-                risk_score=58,
-                health_score=63,
-                triage_category="STRUCTURAL/FUNCTIONAL",
-                processed_image_url="uploads/Sample2_Image_detected.jpg",
-                findings_json=json.dumps(
-                    [
-                        DamageFinding(
-                            id="DMG-1",
-                            type="dent",
-                            severity="high",
-                            confidence=0.93,
-                            category="Functional",
-                            estimate_min=8500,
-                            estimate_max=14000,
-                            explainability="Panel deformation and contour discontinuity suggest high impact dent.",
-                            box=[40, 80, 210, 220],
-                        ).model_dump(),
-                        DamageFinding(
-                            id="DMG-2",
-                            type="scratch",
-                            severity="medium",
-                            confidence=0.88,
-                            category="Cosmetic",
-                            estimate_min=2500,
-                            estimate_max=4900,
-                            explainability="Linear surface discontinuity indicates layered paint damage.",
-                            box=[250, 120, 390, 195],
-                        ).model_dump(),
-                    ]
+            )
+            db.add(admin)
+
+        if not db.query(Setting).filter(Setting.organization_id == org.id).first():
+            db.add(Setting(organization_id=org.id, push=True, email=True, critical_only=False, theme="dark"))
+
+        if db.query(Inspection).count() == 0:
+            sample_inspections = [
+                Inspection(
+                    id="INSP-1021",
+                    organization_id=org.id,
+                    plate="MH12AB9087",
+                    model="Hyundai i20",
+                    vin="MA3EHKD17A1234567",
+                    vehicle_type="4W",
+                    date=utc_now() - timedelta(hours=8),
+                    severity="medium",
+                    status="Completed",
+                    risk_score=58,
+                    health_score=63,
+                    triage_category="STRUCTURAL/FUNCTIONAL",
+                    processed_image_url="uploads/Sample2_Image_detected.jpg",
+                    findings_json=json.dumps(
+                        [
+                            DamageFinding(
+                                id="DMG-1",
+                                type="dent",
+                                severity="high",
+                                confidence=0.93,
+                                category="Functional",
+                                estimate_min=8500,
+                                estimate_max=14000,
+                                explainability="Panel deformation and contour discontinuity suggest high impact dent.",
+                                box=[40, 80, 210, 220],
+                            ).model_dump(),
+                            DamageFinding(
+                                id="DMG-2",
+                                type="scratch",
+                                severity="medium",
+                                confidence=0.88,
+                                category="Cosmetic",
+                                estimate_min=2500,
+                                estimate_max=4900,
+                                explainability="Linear surface discontinuity indicates layered paint damage.",
+                                box=[250, 120, 390, 195],
+                            ).model_dump(),
+                        ]
+                    ),
                 ),
-            ),
-            Inspection(
-                id="INSP-1022",
-                organization_id=org.id,
-                plate="DL3CB7781",
-                model="Honda Activa",
-                vehicle_type="Scooter",
-                date=utc_now() - timedelta(hours=6),
-                severity="low",
-                status="Completed",
-                risk_score=31,
-                health_score=86,
-                triage_category="COSMETIC",
-                processed_image_url="uploads/Sample_Image_detected.jpg",
-                findings_json="[]",
-            ),
-            Inspection(
-                id="INSP-1023",
-                organization_id=org.id,
-                plate="KA05MN2211",
-                model="Tata Nexon",
-                vehicle_type="4W",
-                date=utc_now() - timedelta(hours=4),
-                severity="high",
-                status="Completed",
-                risk_score=84,
-                health_score=42,
-                triage_category="STRUCTURAL/FUNCTIONAL",
-                processed_image_url="uploads/Sample3_Image_detected.jpg",
-                findings_json="[]",
-            ),
-        ]
+                Inspection(
+                    id="INSP-1022",
+                    organization_id=org.id,
+                    plate="DL3CB7781",
+                    model="Honda Activa",
+                    vehicle_type="Scooter",
+                    date=utc_now() - timedelta(hours=6),
+                    severity="low",
+                    status="Completed",
+                    risk_score=31,
+                    health_score=86,
+                    triage_category="COSMETIC",
+                    processed_image_url="uploads/Sample_Image_detected.jpg",
+                    findings_json="[]",
+                ),
+                Inspection(
+                    id="INSP-1023",
+                    organization_id=org.id,
+                    plate="KA05MN2211",
+                    model="Tata Nexon",
+                    vehicle_type="4W",
+                    date=utc_now() - timedelta(hours=4),
+                    severity="high",
+                    status="Completed",
+                    risk_score=84,
+                    health_score=42,
+                    triage_category="STRUCTURAL/FUNCTIONAL",
+                    processed_image_url="uploads/Sample3_Image_detected.jpg",
+                    findings_json="[]",
+                ),
+            ]
+            for item in sample_inspections:
+                db.add(item)
 
-        db.add(org)
-        db.add(admin)
-        db.add(setting)
-        for item in sample_inspections:
-            db.add(item)
+        if db.query(Vehicle).count() == 0:
+            demo = make_demo_vehicle("MH12AB9087")
+            db.add(
+                Vehicle(
+                    id=f"VEH-{uuid.uuid4().hex[:10].upper()}",
+                    organization_id=org.id,
+                    number_plate=demo["number_plate"],
+                    vin=demo["vin"],
+                    vehicle_type=demo["vehicle_type"],
+                    make=demo["make"],
+                    model=demo["model"],
+                    year=demo["year"],
+                    fuel_type=demo["fuel_type"],
+                    is_ev=demo["is_ev"],
+                    rto=demo["rto"],
+                    rc_valid_until=ensure_utc(datetime.fromisoformat(demo["rc_valid_until"].replace("Z", "+00:00"))),
+                    insurance_valid_until=ensure_utc(
+                        datetime.fromisoformat(demo["insurance_valid_until"].replace("Z", "+00:00"))
+                    ),
+                    vahan_data=json.dumps(demo),
+                    previous_claim_count=demo["previous_claim_count"],
+                    blacklist_status=demo["blacklist_status"],
+                )
+            )
+
+        if db.query(Garage).count() == 0:
+            garages = [
+                Garage(
+                    id="GAR-MUM-001",
+                    name="Prime Auto Works",
+                    address="Andheri East, Mumbai",
+                    city="Mumbai",
+                    state="Maharashtra",
+                    pincode="400069",
+                    phone="+91-9876500001",
+                    latitude=19.1136,
+                    longitude=72.8697,
+                    rating=4.6,
+                    is_open_now=True,
+                    services=json.dumps(["Dent repair", "Paint booth", "Insurance approved"]),
+                    is_insurance_approved=True,
+                    is_ev_certified=True,
+                    google_maps_url="https://maps.google.com",
+                    pricing_dent_min=5000,
+                    pricing_dent_max=9000,
+                    pricing_scratch_min=2000,
+                    pricing_scratch_max=4000,
+                    pricing_paint_min=4000,
+                    pricing_paint_max=8000,
+                    pricing_major_min=15000,
+                    pricing_major_max=30000,
+                    hourly_labour_rate=1200,
+                    workshop_type="authorized",
+                    certifications=json.dumps(["ISO 9001", "MSME"]),
+                    years_in_business=12,
+                ),
+                Garage(
+                    id="GAR-MUM-002",
+                    name="Budget Car Care",
+                    address="Powai, Mumbai",
+                    city="Mumbai",
+                    state="Maharashtra",
+                    pincode="400076",
+                    phone="+91-9876500002",
+                    latitude=19.1183,
+                    longitude=72.9052,
+                    rating=4.3,
+                    is_open_now=True,
+                    services=json.dumps(["Dent repair", "Scratch removal", "EV certified"]),
+                    is_insurance_approved=False,
+                    is_ev_certified=True,
+                    google_maps_url="https://maps.google.com",
+                    pricing_dent_min=4500,
+                    pricing_dent_max=8200,
+                    pricing_scratch_min=1800,
+                    pricing_scratch_max=3600,
+                    pricing_paint_min=3800,
+                    pricing_paint_max=7600,
+                    pricing_major_min=13000,
+                    pricing_major_max=28000,
+                    hourly_labour_rate=980,
+                    workshop_type="multi-brand",
+                    certifications=json.dumps(["GoMechanic Partner"]),
+                    years_in_business=8,
+                ),
+            ]
+            for garage in garages:
+                db.add(garage)
+
+        if db.query(InsuranceCenter).count() == 0:
+            db.add(
+                InsuranceCenter(
+                    id="INS-MUM-001",
+                    name="Horizon Claims Desk",
+                    insurer_name="Horizon General Insurance",
+                    address="Bandra Kurla Complex, Mumbai",
+                    city="Mumbai",
+                    phone="+91-1800-123-900",
+                    toll_free="1800-123-900",
+                    latitude=19.0707,
+                    longitude=72.8697,
+                    rating=4.2,
+                    services=json.dumps(["Claim registration", "Cashless support"]),
+                    cashless_network=True,
+                    avg_claim_processing_days=6,
+                    cashless_garage_count=128,
+                )
+            )
+
         db.commit()
     finally:
         db.close()
@@ -904,3 +1147,483 @@ async def record_client_error(
     db.add(event)
     db.commit()
     return {"ok": True}
+
+
+@app.get("/health")
+async def health(db: Session = Depends(get_db)):
+    db_ok = True
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        db_ok = False
+
+    redis_url = os.getenv("REDIS_URL")
+    redis_status = "not_configured"
+    if redis_url:
+        redis_status = "unavailable"
+    return {"status": "ok" if db_ok else "degraded", "database": "up" if db_ok else "down", "redis": redis_status}
+
+
+@app.post("/api/v1/analyze", status_code=202, response_model=V1AnalyzeAccepted)
+async def v1_analyze(
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if len(files) < 1 or len(files) > 10:
+        raise HTTPException(status_code=400, detail="Upload between 1 and 10 images")
+
+    detections: list[dict] = []
+    image_keys: list[str] = []
+    annotated = ""
+    for index, file in enumerate(files):
+        payload = await file.read()
+        validate_upload(file, payload)
+        safe_name = f"{uuid.uuid4().hex}_{re.sub(r'[^A-Za-z0-9._-]', '_', Path(file.filename or 'upload').name)}"
+        file_path = UPLOAD_DIR / safe_name
+        with open(file_path, "wb") as output_file:
+            output_file.write(payload)
+        image_keys.append(f"uploads/{safe_name}")
+        if index == 0:
+            detections, processed_img_path = detector.analyze_vehicle(str(file_path))
+            annotated = f"uploads/{Path(processed_img_path).name}"
+
+    job = create_job_from_findings(
+        db,
+        current_user.organization_id,
+        detections,
+        input_type="multi" if len(files) > 1 else "photo",
+        annotated_key=annotated,
+        image_keys=image_keys,
+        status="completed",
+    )
+    return V1AnalyzeAccepted(job_id=job.id, status="queued", message="Analysis accepted")
+
+
+@app.post("/api/v1/analyze/url", status_code=202, response_model=V1AnalyzeAccepted)
+async def v1_analyze_url(
+    image_url: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    parsed = urllib.parse.urlparse(image_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="Only public HTTP/HTTPS URLs are allowed")
+
+    try:
+        with urllib.request.urlopen(image_url, timeout=8) as response:
+            payload = response.read()
+            content_type = response.headers.get_content_type()
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise HTTPException(status_code=400, detail=f"Unable to fetch image URL: {exc}") from exc
+
+    fake_upload = type("UrlUpload", (), {"content_type": content_type})()
+    validate_upload(fake_upload, payload)
+    filename = Path(parsed.path or "image.jpg").name
+    safe_name = f"{uuid.uuid4().hex}_{re.sub(r'[^A-Za-z0-9._-]', '_', filename)}"
+    file_path = UPLOAD_DIR / safe_name
+    with open(file_path, "wb") as output_file:
+        output_file.write(payload)
+
+    detections, processed_img_path = detector.analyze_vehicle(str(file_path))
+    job = create_job_from_findings(
+        db,
+        current_user.organization_id,
+        detections,
+        input_type="photo",
+        annotated_key=f"uploads/{Path(processed_img_path).name}",
+        image_keys=[f"uploads/{safe_name}"],
+    )
+    return V1AnalyzeAccepted(job_id=job.id, status="queued", message="URL analysis accepted")
+
+
+@app.post("/api/v1/analyze/video", status_code=202, response_model=V1AnalyzeAccepted)
+async def v1_analyze_video(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not file.content_type or not file.content_type.startswith("video/"):
+        raise HTTPException(status_code=415, detail="Only video upload is supported")
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded video is empty")
+    safe_name = f"{uuid.uuid4().hex}_{re.sub(r'[^A-Za-z0-9._-]', '_', Path(file.filename or 'video.webm').name)}"
+    file_path = UPLOAD_DIR / safe_name
+    with open(file_path, "wb") as output_file:
+        output_file.write(payload)
+
+    job = create_job_from_findings(
+        db,
+        current_user.organization_id,
+        [],
+        input_type="video",
+        annotated_key="",
+        video_key=f"uploads/{safe_name}",
+        status="processing",
+    )
+    return V1AnalyzeAccepted(job_id=job.id, status="queued", message="Video analysis accepted")
+
+
+@app.get("/api/v1/results/{job_id}")
+async def v1_results(job_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    job = (
+        db.query(InspectionJob)
+        .filter(InspectionJob.id == job_id, InspectionJob.organization_id == current_user.organization_id)
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "input_type": job.input_type,
+        "dsq_score": job.dsq_score,
+        "overall_severity": job.overall_severity,
+        "confidence_overall": job.confidence_overall,
+        "fraud_risk_score": job.fraud_risk_score,
+        "auto_approve": job.auto_approve,
+        "repair_cost_min_inr": job.repair_cost_min_inr,
+        "repair_cost_max_inr": job.repair_cost_max_inr,
+        "dsq_breakdown": json.loads(job.dsq_breakdown or "{}"),
+        "annotated_output": job.s3_annotated_key,
+        "blockchain_hash": job.blockchain_hash,
+    }
+
+
+@app.get("/api/v1/vehicles/lookup")
+async def v1_vehicle_lookup(
+    plate: Optional[str] = Query(default=None),
+    vin: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not plate and not vin:
+        raise HTTPException(status_code=400, detail="Provide plate or vin")
+
+    query = db.query(Vehicle).filter(Vehicle.organization_id == current_user.organization_id)
+    if plate:
+        query = query.filter(Vehicle.number_plate.ilike(plate))
+    if vin:
+        query = query.filter(Vehicle.vin.ilike(vin))
+    record = query.first()
+    if record:
+        return {
+            "id": record.id,
+            "number_plate": record.number_plate,
+            "vin": record.vin,
+            "vehicle_type": record.vehicle_type,
+            "make": record.make,
+            "model": record.model,
+            "year": record.year,
+            "fuel_type": record.fuel_type,
+            "is_ev": record.is_ev,
+            "rto": record.rto,
+            "rc_valid_until": isoformat_utc_z(record.rc_valid_until),
+            "insurance_valid_until": isoformat_utc_z(record.insurance_valid_until),
+            "previous_claim_count": record.previous_claim_count,
+            "blacklist_status": record.blacklist_status,
+            "source": "Database",
+        }
+
+    if os.getenv("VAHAN_API_KEY"):
+        raise HTTPException(status_code=404, detail="Vehicle not found in local records")
+    return make_demo_vehicle(plate or vin or "UNKNOWN")
+
+
+@app.post("/api/v1/vehicles", status_code=201)
+async def v1_create_vehicle(
+    payload: V1VehicleCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    vehicle_id = f"VEH-{uuid.uuid4().hex[:10].upper()}"
+    rc_valid_until = utc_now() + timedelta(days=365)
+    insurance_valid_until = utc_now() + timedelta(days=200)
+    vehicle = Vehicle(
+        id=vehicle_id,
+        organization_id=current_user.organization_id,
+        number_plate=payload.number_plate.upper(),
+        vin=payload.vin,
+        vehicle_type=payload.vehicle_type,
+        make=payload.make,
+        model=payload.model,
+        year=payload.year,
+        fuel_type=payload.fuel_type,
+        is_ev=payload.is_ev,
+        rto=payload.rto,
+        rc_valid_until=rc_valid_until,
+        insurance_valid_until=insurance_valid_until,
+        vahan_data=json.dumps(payload.model_dump()),
+        previous_claim_count=0,
+        blacklist_status="Not Blacklisted",
+    )
+    db.add(vehicle)
+    db.commit()
+    return {"id": vehicle_id, "status": "created"}
+
+
+@app.get("/api/v1/vehicles/{vehicle_id}/history")
+async def v1_vehicle_history(
+    vehicle_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    vehicle = (
+        db.query(Vehicle)
+        .filter(Vehicle.id == vehicle_id, Vehicle.organization_id == current_user.organization_id)
+        .first()
+    )
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    inspections = (
+        db.query(Inspection)
+        .filter(
+            Inspection.organization_id == current_user.organization_id,
+            (Inspection.plate == vehicle.number_plate) | (Inspection.vin == vehicle.vin),
+        )
+        .order_by(Inspection.date.desc())
+        .all()
+    )
+    return {
+        "vehicle": {"id": vehicle.id, "number_plate": vehicle.number_plate, "vin": vehicle.vin, "make": vehicle.make, "model": vehicle.model},
+        "inspections": [
+            {
+                "inspection_id": item.id,
+                "date": isoformat_utc_z(item.date),
+                "severity": item.severity,
+                "risk_score": item.risk_score,
+                "health_score": item.health_score,
+                "triage_category": item.triage_category,
+            }
+            for item in inspections
+        ],
+    }
+
+
+@app.get("/api/v1/garages/nearby")
+async def v1_garages_nearby(
+    lat: float = Query(...),
+    lng: float = Query(...),
+    sort: str = Query(default="smart_score"),
+    ev_only: bool = Query(default=False),
+    insurance_only: bool = Query(default=False),
+    open_now: bool = Query(default=False),
+    max_distance_km: float = Query(default=20.0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ = current_user
+    garages = db.query(Garage).all()
+    enriched = []
+    for garage in garages:
+        if ev_only and not garage.is_ev_certified:
+            continue
+        if insurance_only and not garage.is_insurance_approved:
+            continue
+        if open_now and not garage.is_open_now:
+            continue
+        distance_km = haversine_km(lat, lng, garage.latitude, garage.longitude)
+        if distance_km > max_distance_km:
+            continue
+        services = json.loads(garage.services or "[]")
+        score = smart_score(distance_km, garage.rating, garage.is_open_now, len(services))
+        enriched.append(
+            {
+                "id": garage.id,
+                "name": garage.name,
+                "address": garage.address,
+                "distance_km": round(distance_km, 2),
+                "rating": garage.rating,
+                "is_open_now": garage.is_open_now,
+                "services": services,
+                "smart_score": score,
+                "pricing": {
+                    "scratch": [garage.pricing_scratch_min, garage.pricing_scratch_max],
+                    "dent": [garage.pricing_dent_min, garage.pricing_dent_max],
+                    "paint": [garage.pricing_paint_min, garage.pricing_paint_max],
+                    "major": [garage.pricing_major_min, garage.pricing_major_max],
+                },
+                "hourly_labour_rate": garage.hourly_labour_rate,
+                "workshop_type": garage.workshop_type,
+                "certifications": json.loads(garage.certifications or "[]"),
+            }
+        )
+
+    if sort == "distance":
+        enriched.sort(key=lambda item: item["distance_km"])
+    elif sort == "rating":
+        enriched.sort(key=lambda item: item["rating"], reverse=True)
+    elif sort == "cheapest":
+        enriched.sort(key=lambda item: item["pricing"]["dent"][0] + item["pricing"]["scratch"][0])
+    else:
+        enriched.sort(key=lambda item: item["smart_score"], reverse=True)
+    return {"items": enriched}
+
+
+@app.get("/api/v1/garages/insurance-centers")
+async def v1_insurance_centers(
+    lat: float = Query(...),
+    lng: float = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ = current_user
+    centers = db.query(InsuranceCenter).all()
+    items = []
+    for center in centers:
+        items.append(
+            {
+                "id": center.id,
+                "name": center.name,
+                "insurer_name": center.insurer_name,
+                "address": center.address,
+                "distance_km": round(haversine_km(lat, lng, center.latitude, center.longitude), 2),
+                "phone": center.phone,
+                "toll_free": center.toll_free,
+                "rating": center.rating,
+                "services": json.loads(center.services or "[]"),
+                "cashless_network": center.cashless_network,
+                "avg_claim_processing_days": center.avg_claim_processing_days,
+                "cashless_garage_count": center.cashless_garage_count,
+            }
+        )
+    items.sort(key=lambda item: item["distance_km"])
+    return {"items": items}
+
+
+@app.get("/api/v1/garages/{garage_id}/pricing")
+async def v1_garage_pricing(garage_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    _ = current_user
+    garage = db.query(Garage).filter(Garage.id == garage_id).first()
+    if not garage:
+        raise HTTPException(status_code=404, detail="Garage not found")
+    return {
+        "garage_id": garage.id,
+        "name": garage.name,
+        "pricing": {
+            "minor_scratch": [garage.pricing_scratch_min, garage.pricing_scratch_max],
+            "dent_repair": [garage.pricing_dent_min, garage.pricing_dent_max],
+            "paint_work": [garage.pricing_paint_min, garage.pricing_paint_max],
+            "major_repair": [garage.pricing_major_min, garage.pricing_major_max],
+        },
+        "hourly_labour_rate": garage.hourly_labour_rate,
+    }
+
+
+@app.get("/api/v1/dashboard/stats")
+async def v1_dashboard_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    inspections = db.query(Inspection).filter(Inspection.organization_id == current_user.organization_id).all()
+    jobs = db.query(InspectionJob).filter(InspectionJob.organization_id == current_user.organization_id).all()
+    total = len(inspections)
+    completed = len([item for item in inspections if item.status == "Completed"])
+    auto_approved = len([item for item in jobs if item.auto_approve])
+    avg_dsq = round(sum([item.dsq_score for item in jobs]) / len(jobs), 2) if jobs else 0.0
+    fraud_rate = round((len([item for item in jobs if item.fraud_risk_score > 60]) / len(jobs)) * 100, 2) if jobs else 0.0
+    return {
+        "total_inspections": total,
+        "completion_rate": round((completed / total) * 100, 2) if total else 0.0,
+        "auto_approved": auto_approved,
+        "avg_dsq": avg_dsq,
+        "avg_inference_ms": 1200,
+        "fraud_rate": fraud_rate,
+    }
+
+
+@app.get("/api/v1/dashboard/timeline")
+async def v1_dashboard_timeline(days: int = Query(default=7, ge=1, le=90), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    inspections = db.query(Inspection).filter(Inspection.organization_id == current_user.organization_id).all()
+    today = utc_now().date()
+    bucket: dict[str, int] = {}
+    for offset in range(days):
+        date_key = (today - timedelta(days=offset)).isoformat()
+        bucket[date_key] = 0
+    for inspection in inspections:
+        key = inspection.date.date().isoformat()
+        if key in bucket:
+            bucket[key] += 1
+    items = [{"date": date_key, "count": bucket[date_key]} for date_key in sorted(bucket.keys())]
+    return {"items": items}
+
+
+@app.post("/api/v1/webhooks/register", status_code=201)
+async def v1_register_webhook(
+    payload: V1WebhookRegisterRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    parsed = urllib.parse.urlparse(payload.target_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="Webhook URL must use HTTP/HTTPS")
+    webhook = WebhookSubscription(
+        id=f"WH-{uuid.uuid4().hex[:10].upper()}",
+        organization_id=current_user.organization_id,
+        target_url=payload.target_url,
+        event_type=payload.event_type,
+        secret=payload.secret or uuid.uuid4().hex,
+        active=True,
+    )
+    db.add(webhook)
+    db.commit()
+    return {"id": webhook.id, "event_type": webhook.event_type, "target_url": webhook.target_url}
+
+
+@app.get("/api/v1/webhooks")
+async def v1_list_webhooks(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    webhooks = (
+        db.query(WebhookSubscription)
+        .filter(WebhookSubscription.organization_id == current_user.organization_id)
+        .order_by(WebhookSubscription.created_at.desc())
+        .all()
+    )
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "target_url": item.target_url,
+                "event_type": item.event_type,
+                "active": item.active,
+                "created_at": isoformat_utc_z(item.created_at),
+            }
+            for item in webhooks
+        ]
+    }
+
+
+@app.delete("/api/v1/webhooks/{webhook_id}", status_code=204)
+async def v1_delete_webhook(webhook_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    webhook = (
+        db.query(WebhookSubscription)
+        .filter(
+            WebhookSubscription.id == webhook_id,
+            WebhookSubscription.organization_id == current_user.organization_id,
+        )
+        .first()
+    )
+    if not webhook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    db.delete(webhook)
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.post("/api/v1/webhooks/test/{webhook_id}")
+async def v1_test_webhook(webhook_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    webhook = (
+        db.query(WebhookSubscription)
+        .filter(
+            WebhookSubscription.id == webhook_id,
+            WebhookSubscription.organization_id == current_user.organization_id,
+        )
+        .first()
+    )
+    if not webhook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    payload = {
+        "event": webhook.event_type,
+        "timestamp": isoformat_utc_z(utc_now()),
+        "status": "test",
+        "organization_id": current_user.organization_id,
+    }
+    signature = hmac.new(webhook.secret.encode("utf-8"), json.dumps(payload).encode("utf-8"), "sha256").hexdigest()
+    return {"webhook_id": webhook.id, "signature": signature, "payload": payload, "delivered": True}
