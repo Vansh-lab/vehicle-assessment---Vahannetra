@@ -1,4 +1,5 @@
 import pytest
+from itertools import product
 
 from app.services.dsq_v2 import compute_dsq_v2
 
@@ -300,3 +301,46 @@ def test_breakdown_sum_tracks_score_normalization():
     total = sum(result.breakdown.values())
     normalized = round(min(100.0, result.score) / 100.0, 4)
     assert abs(total - normalized) <= 0.001
+
+
+MATRIX_DAMAGE_TYPES = ["scratch", "dent", "crack", "broken part", "paint damage"]
+MATRIX_SEVERITIES = ["low", "medium", "high"]
+MATRIX_CONFIDENCES = [0.1, 0.5, 0.9]
+MATRIX_BOXES = [[0, 0, 20, 20], [0, 0, 240, 240], [0, 0, 900, 700], [0, 0, 1280, 720]]
+
+DSQ_MATRIX_CASES = [
+    {
+        "cls": cls,
+        "severity": severity,
+        "confidence": confidence,
+        "box": box,
+    }
+    for cls, severity, confidence, box in product(
+        MATRIX_DAMAGE_TYPES, MATRIX_SEVERITIES, MATRIX_CONFIDENCES, MATRIX_BOXES
+    )
+][:47]
+
+
+@pytest.mark.parametrize("case", DSQ_MATRIX_CASES)
+def test_dsq_v2_47_case_matrix_contract(case: dict):
+    result = compute_dsq_v2(
+        [
+            _finding(
+                cls=case["cls"],
+                severity=case["severity"],
+                confidence=case["confidence"],
+                box=case["box"],
+            )
+        ],
+        (720, 1280, 3),
+    )
+    assert 0 <= result.score <= 100
+    assert result.overall_severity in {"low", "medium", "high"}
+    assert 0 <= result.fraud_risk_score <= 100
+    assert result.repair_cost_min_inr <= result.repair_cost_max_inr
+    assert set(result.breakdown.keys()) == {
+        "area_ratio",
+        "part_criticality",
+        "functional_impact",
+        "confidence",
+    }

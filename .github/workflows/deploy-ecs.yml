@@ -1,0 +1,145 @@
+name: Deploy ECS/ECR
+
+on:
+  push:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+  BACKEND_IMAGE_REPO: ${{ vars.BACKEND_IMAGE_REPO || 'vahannetra-backend' }}
+  FRONTEND_IMAGE_REPO: ${{ vars.FRONTEND_IMAGE_REPO || 'vahannetra-frontend' }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'vahannetra-prod' }}
+  ECS_BACKEND_SERVICE: ${{ vars.ECS_BACKEND_SERVICE || 'vahannetra-backend-svc' }}
+  ECS_FRONTEND_SERVICE: ${{ vars.ECS_FRONTEND_SERVICE || 'vahannetra-frontend-svc' }}
+  BENCHMARK_URL_1: ${{ vars.BENCHMARK_URL_1 || 'https://example.invalid/health' }}
+  BENCHMARK_URL_2: ${{ vars.BENCHMARK_URL_2 || 'https://example.invalid/api/v1/system/capabilities' }}
+  BENCHMARK_URL_3: ${{ vars.BENCHMARK_URL_3 || 'https://example.invalid/api/v1/dashboard/stats' }}
+  BENCHMARK_URL_4: ${{ vars.BENCHMARK_URL_4 || 'https://example.invalid/api/v1/dashboard/timeline?days=7' }}
+  BENCHMARK_URL_5: ${{ vars.BENCHMARK_URL_5 || 'https://example.invalid/api/v1/garages/nearby?lat=19.07&lng=72.87' }}
+  BENCHMARK_URL_6: ${{ vars.BENCHMARK_URL_6 || 'https://example.invalid/api/v1/system/queue/observability' }}
+  BENCHMARK_URL_7: ${{ vars.BENCHMARK_URL_7 || 'https://example.invalid/dashboard/overview' }}
+  BENCHMARK_URL_8: ${{ vars.BENCHMARK_URL_8 || 'https://example.invalid/' }}
+
+jobs:
+  build-and-push:
+    name: Build and push backend/frontend images
+    runs-on: ubuntu-latest
+    outputs:
+      backend_image: ${{ steps.meta.outputs.backend_image }}
+      frontend_image: ${{ steps.meta.outputs.frontend_image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build + push backend image
+        working-directory: FDA_Project/vehicle_assessment_backend
+        run: |
+          BACKEND_IMAGE=${{ steps.ecr.outputs.registry }}/${{ env.BACKEND_IMAGE_REPO }}:${{ github.sha }}
+          docker build -t "$BACKEND_IMAGE" .
+          docker push "$BACKEND_IMAGE"
+          echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
+
+      - name: Build + push frontend image
+        working-directory: FDA_Project/vahannetra_frontend
+        run: |
+          FRONTEND_IMAGE=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE_REPO }}:${{ github.sha }}
+          docker build -t "$FRONTEND_IMAGE" .
+          docker push "$FRONTEND_IMAGE"
+          echo "FRONTEND_IMAGE=$FRONTEND_IMAGE" >> $GITHUB_ENV
+
+      - name: Export image metadata
+        id: meta
+        run: |
+          echo "backend_image=${BACKEND_IMAGE}" >> $GITHUB_OUTPUT
+          echo "frontend_image=${FRONTEND_IMAGE}" >> $GITHUB_OUTPUT
+
+  deploy:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    outputs:
+      previous_backend_taskdef: ${{ steps.capture.outputs.previous_backend_taskdef }}
+      previous_frontend_taskdef: ${{ steps.capture.outputs.previous_frontend_taskdef }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Capture current task definitions (rollback anchor)
+        id: capture
+        run: |
+          BACKEND_TD=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" --query 'services[0].taskDefinition' --output text)
+          FRONTEND_TD=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_FRONTEND_SERVICE" --query 'services[0].taskDefinition' --output text)
+          echo "previous_backend_taskdef=$BACKEND_TD" >> $GITHUB_OUTPUT
+          echo "previous_frontend_taskdef=$FRONTEND_TD" >> $GITHUB_OUTPUT
+
+      - name: Force rolling deployment
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_BACKEND_SERVICE" --force-new-deployment >/dev/null
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_FRONTEND_SERVICE" --force-new-deployment >/dev/null
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" "$ECS_FRONTEND_SERVICE"
+
+  health-gates:
+    name: Health gates + timed perf evidence
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    steps:
+      - name: Run 8-service timed checks and health gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p perf
+          : > perf/timed-benchmark.csv
+          echo "target,http_code,time_total,time_connect,time_starttransfer" > perf/timed-benchmark.csv
+          for target in "$BENCHMARK_URL_1" "$BENCHMARK_URL_2" "$BENCHMARK_URL_3" "$BENCHMARK_URL_4" "$BENCHMARK_URL_5" "$BENCHMARK_URL_6" "$BENCHMARK_URL_7" "$BENCHMARK_URL_8"; do
+            metrics=$(curl -sS -o /dev/null -w "%{http_code},%{time_total},%{time_connect},%{time_starttransfer}" "$target" || echo "000,0,0,0")
+            echo "$target,$metrics" >> perf/timed-benchmark.csv
+            code=$(echo "$metrics" | cut -d',' -f1)
+            if [[ "$code" == "000" || "$code" -ge 500 ]]; then
+              echo "Health gate failed for $target with code=$code"
+              exit 1
+            fi
+          done
+
+      - name: Upload perf evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecs-timed-perf-evidence-${{ github.run_id }}
+          path: perf/timed-benchmark.csv
+          retention-days: 30
+
+  rollback-on-failure:
+    name: Rollback on failed health gates
+    runs-on: ubuntu-latest
+    if: ${{ failure() && needs.deploy.result == 'success' }}
+    needs: [deploy, health-gates]
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Rollback to captured task definitions
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_BACKEND_SERVICE" --task-definition "${{ needs.deploy.outputs.previous_backend_taskdef }}" >/dev/null
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_FRONTEND_SERVICE" --task-definition "${{ needs.deploy.outputs.previous_frontend_taskdef }}" >/dev/null
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_BACKEND_SERVICE" "$ECS_FRONTEND_SERVICE"

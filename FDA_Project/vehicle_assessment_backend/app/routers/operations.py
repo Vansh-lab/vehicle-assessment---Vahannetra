@@ -1,4 +1,5 @@
 import uuid
+import json
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
@@ -78,6 +79,21 @@ def to_history_item(record: Inspection) -> InspectionHistoryItem:
     )
 
 
+def _integration_error_contract(exc: IntegrationError) -> dict:
+    try:
+        parsed = json.loads(str(exc))
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    return {
+        "provider": "unknown",
+        "code": "integration_error",
+        "message": str(exc),
+        "retryable": True,
+    }
+
+
 @router.get("/dashboard/overview", response_model=DashboardOverviewResponse)
 async def dashboard_overview(
     db: AsyncSession = Depends(get_async_db),
@@ -139,8 +155,11 @@ async def submit_claim(
         )
         provider_ref = connector_response.provider_reference
         claim_status = "Submitted" if connector_response.accepted else "Queued"
-    except IntegrationError:
-        provider_ref = f"{payload.destination.upper()}-PENDING-{uuid.uuid4().hex[:6]}"
+    except IntegrationError as exc:
+        contract = _integration_error_contract(exc)
+        provider = str(contract.get("provider", "connector")).upper()
+        code = str(contract.get("code", "error")).upper()
+        provider_ref = f"{provider}-{code}-PENDING-{uuid.uuid4().hex[:6]}"
         claim_status = "Queued"
 
     claim = Claim(

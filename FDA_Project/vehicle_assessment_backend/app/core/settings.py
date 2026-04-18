@@ -24,8 +24,12 @@ class Settings:
     integration_max_retries: int
     integration_circuit_failures: int
     integration_circuit_recovery_seconds: int
+    integration_rate_limit_per_minute: int
     vahan_base_url: str
     insurer_base_url: str
+    vahan_api_key: str
+    insurer_api_key: str
+    integration_signing_secret: str
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -68,8 +72,16 @@ settings = Settings(
     integration_circuit_recovery_seconds=int(
         os.getenv("VAHANNETRA_INTEGRATION_CIRCUIT_RECOVERY_SECONDS", "30")
     ),
+    integration_rate_limit_per_minute=int(
+        os.getenv("VAHANNETRA_INTEGRATION_RATE_LIMIT_PER_MINUTE", "120")
+    ),
     vahan_base_url=os.getenv("VAHANNETRA_VAHAN_BASE_URL", "https://vahan.example"),
     insurer_base_url=os.getenv(
         "VAHANNETRA_INSURER_BASE_URL", "https://insurer.example"
+    ),
+    vahan_api_key=os.getenv("VAHANNETRA_VAHAN_API_KEY", ""),
+    insurer_api_key=os.getenv("VAHANNETRA_INSURER_API_KEY", ""),
+    integration_signing_secret=os.getenv(
+        "VAHANNETRA_INTEGRATION_SIGNING_SECRET", "change-me-prod-signing-secret"
     ),
 )

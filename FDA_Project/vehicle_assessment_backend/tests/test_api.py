@@ -81,6 +81,12 @@ def test_v1_health_and_stats_endpoints():
     assert "integrations" in capabilities.json()
     assert "celery" in capabilities.json()
 
+    queue_obs = client.get("/api/v1/system/queue/observability", headers=headers)
+    assert queue_obs.status_code == 200
+    queue_payload = queue_obs.json()
+    assert "dlq_open" in queue_payload
+    assert "escalation_required" in queue_payload
+
 
 def test_v1_vehicle_create_lookup_and_history():
     headers = _auth_headers()

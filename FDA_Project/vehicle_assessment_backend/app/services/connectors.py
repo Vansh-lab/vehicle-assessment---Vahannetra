@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import hashlib
 import json
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -25,6 +27,14 @@ class IntegrationUnavailableError(IntegrationError):
 
 
 class CircuitOpenError(IntegrationError):
+    pass
+
+
+class IntegrationRateLimitedError(IntegrationError):
+    pass
+
+
+class IntegrationContractError(IntegrationError):
     pass
 
 
@@ -72,6 +82,22 @@ class VahanVehicleRecord:
     source: str
 
 
+@dataclass(frozen=True)
+class IntegrationFailureContract:
+    provider: str
+    code: str
+    message: str
+    retryable: bool
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "code": self.code,
+            "message": self.message,
+            "retryable": self.retryable,
+        }
+
+
 _breaker_vahan = CircuitBreaker(
     name="vahan",
     failure_threshold=settings.integration_circuit_failures,
@@ -82,6 +108,53 @@ _breaker_insurer = CircuitBreaker(
     failure_threshold=settings.integration_circuit_failures,
     recovery_seconds=settings.integration_circuit_recovery_seconds,
 )
+_rate_limits: dict[str, deque[datetime]] = {"vahan": deque(), "insurer": deque()}
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _enforce_rate_limit(provider: str) -> None:
+    limit = max(1, settings.integration_rate_limit_per_minute)
+    now = _utc_now()
+    window_start = now - timedelta(minutes=1)
+    events = _rate_limits.setdefault(provider, deque())
+    while events and events[0] < window_start:
+        events.popleft()
+    if len(events) >= limit:
+        raise IntegrationRateLimitedError(f"{provider} rate limit exceeded")
+    events.append(now)
+
+
+def _signed_headers(
+    *, provider: str, url: str, payload: dict[str, Any] | None, api_key: str
+) -> dict[str, str]:
+    timestamp = str(int(_utc_now().timestamp()))
+    body = json.dumps(payload or {}, sort_keys=True, separators=(",", ":"))
+    signing_input = f"{provider}|{url}|{timestamp}|{body}"
+    signature = hmac.new(
+        settings.integration_signing_secret.encode("utf-8"),
+        signing_input.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    headers = {
+        "Content-Type": "application/json",
+        "X-VahanNetra-Timestamp": timestamp,
+        "X-VahanNetra-Signature": signature,
+        "X-VahanNetra-Provider": provider,
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+def _failure_contract(
+    provider: str, code: str, message: str, retryable: bool
+) -> IntegrationFailureContract:
+    return IntegrationFailureContract(
+        provider=provider, code=code, message=message, retryable=retryable
+    )
 
 
 async def _request_json(
@@ -92,28 +165,62 @@ async def _request_json(
     max_retries: int,
     circuit: CircuitBreaker,
     json_payload: dict[str, Any] | None = None,
+    provider: str,
+    api_key: str,
+    required_response_fields: tuple[str, ...] = (),
 ) -> dict[str, Any]:
+    _enforce_rate_limit(provider)
     if not circuit.can_attempt():
-        raise CircuitOpenError(f"{circuit.name} connector circuit is open")
+        contract = _failure_contract(
+            provider, "circuit_open", f"{circuit.name} connector circuit is open", True
+        )
+        raise CircuitOpenError(json.dumps(contract.as_dict()))
 
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
             timeout = httpx.Timeout(timeout_seconds)
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.request(method, url, json=json_payload)
+                response = await client.request(
+                    method,
+                    url,
+                    json=json_payload,
+                    headers=_signed_headers(
+                        provider=provider,
+                        url=url,
+                        payload=json_payload,
+                        api_key=api_key,
+                    ),
+                )
                 response.raise_for_status()
                 circuit.on_success()
                 body = response.json()
-                return body if isinstance(body, dict) else {"data": body}
+                payload = body if isinstance(body, dict) else {"data": body}
+                for required_field in required_response_fields:
+                    if required_field not in payload:
+                        contract = _failure_contract(
+                            provider,
+                            "invalid_response_contract",
+                            f"Missing required field: {required_field}",
+                            False,
+                        )
+                        raise IntegrationContractError(json.dumps(contract.as_dict()))
+                return payload
         except httpx.TimeoutException as exc:
             circuit.on_failure()
-            last_error = IntegrationTimeoutError(f"{circuit.name} timeout: {exc}")
+            contract = _failure_contract(
+                provider, "timeout", f"{circuit.name} timeout: {exc}", True
+            )
+            last_error = IntegrationTimeoutError(json.dumps(contract.as_dict()))
         except (httpx.HTTPError, ValueError) as exc:
             circuit.on_failure()
-            last_error = IntegrationUnavailableError(
-                f"{circuit.name} unavailable: {exc}"
+            contract = _failure_contract(
+                provider, "unavailable", f"{circuit.name} unavailable: {exc}", True
             )
+            last_error = IntegrationUnavailableError(json.dumps(contract.as_dict()))
+        except IntegrationContractError as exc:
+            circuit.on_failure()
+            last_error = exc
 
         if attempt < max_retries:
             await asyncio.sleep(min(0.2 * (2**attempt), 1.0))
@@ -137,6 +244,9 @@ class VahanConnector:
             max_retries=settings.integration_max_retries,
             circuit=_breaker_vahan,
             json_payload={"number_plate": number_plate},
+            provider="vahan",
+            api_key=settings.vahan_api_key,
+            required_response_fields=("number_plate", "policy_valid"),
         )
         return VahanVehicleRecord(
             number_plate=str(payload.get("number_plate", number_plate)).upper(),
@@ -174,6 +284,9 @@ class InsurerConnector:
                 "destination": destination,
                 "organization_id": organization_id,
             },
+            provider="insurer",
+            api_key=settings.insurer_api_key,
+            required_response_fields=("status",),
         )
         provider_reference = str(payload.get("provider_reference", "")).strip()
         if not provider_reference:
