@@ -128,7 +128,7 @@ export default function ResultPage() {
         <PartGraph items={partGraphData} />
       </div>
 
-      <BeforeAfterSlider beforeUrl={result.processedImageUrl} afterUrl={result.processedImageUrl} />
+      <BeforeAfterSlider beforeUrl="/favicon.ico" afterUrl={result.processedImageUrl} />
 
       <NearbyServices
         items={[

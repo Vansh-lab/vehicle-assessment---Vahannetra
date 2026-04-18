@@ -4,4 +4,4 @@ __pycache__/
 .pytest_cache/
 
 uploads/*.webm
-uploads/*sample_webm
+uploads/sample.webm
