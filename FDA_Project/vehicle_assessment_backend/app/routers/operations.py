@@ -1,6 +1,6 @@
+import uuid
 from datetime import datetime, timezone
 from typing import Literal, Optional
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
