@@ -16,8 +16,8 @@ export function AnnotatedImageViewer({ imageUrl, findings, heatmapEnabled }: Ann
     () =>
       findings.map((item) => {
         const [x1, y1, x2, y2] = item.box;
-        const width = Math.max(1, imageDims.width);
-        const height = Math.max(1, imageDims.height);
+        const width = imageDims.width > 0 ? imageDims.width : 420;
+        const height = imageDims.height > 0 ? imageDims.height : 280;
         const left = Math.max(0, Math.min(100, (x1 / width) * 100));
         const top = Math.max(0, Math.min(100, (y1 / height) * 100));
         const boxWidth = Math.max(1, Math.min(100 - left, ((x2 - x1) / width) * 100));

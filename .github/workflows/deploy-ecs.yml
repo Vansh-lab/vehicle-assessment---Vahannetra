@@ -100,7 +100,7 @@ jobs:
 
       - name: Skip deploy path (AWS prerequisites not ready)
         if: ${{ steps.deploy-ready.outputs.deploy_enabled != 'true' }}
-        run: echo "Deploy prerequisites are not ready (missing/invalid AWS role credentials). Skipping deploy workflow path."
+        run: echo "Deploy prerequisites are not ready (deploy disabled or AWS prerequisites unavailable). Skipping deploy workflow path."
 
   deploy:
     name: Deploy to ECS
