@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "next/navigation";
 import { ShieldCheck, Smartphone } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,7 +22,7 @@ const schema = z.object({
 type LoginValues = z.infer<typeof schema>;
 
 export default function LoginPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -42,9 +42,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (isSessionActive()) {
-      navigate("/dashboard", { replace: true });
+      router.replace("/dashboard");
     }
-  }, [navigate]);
+  }, [router]);
 
   const onSubmit = async (values: LoginValues) => {
     try {
@@ -52,7 +52,7 @@ export default function LoginPage() {
       setError("");
       const auth = await loginWithBackend(values);
       setSessionFromAuth(auth);
-      navigate("/dashboard");
+      router.push("/dashboard");
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Login failed");
     } finally {

@@ -1,10 +1,12 @@
 type OptionalString = string | undefined;
 
 function readEnv(viteKey: string, legacyKey: string, fallback?: string): OptionalString {
-  const viteValue =
+  const viteEnv =
     typeof import.meta !== "undefined"
-      ? (import.meta.env as Record<string, string | undefined>)[viteKey]
+      ? (import.meta as { env?: Record<string, string | undefined> }).env
       : undefined;
+  const viteValue =
+    viteEnv?.[viteKey];
   const legacyValue =
     typeof process !== "undefined"
       ? (process.env as Record<string, string | undefined> | undefined)?.[legacyKey]
@@ -24,7 +26,9 @@ function requireEnv(value: OptionalString, key: string): string {
 }
 
 const isProduction =
-  (typeof import.meta !== "undefined" ? import.meta.env.PROD : undefined) ??
+  (typeof import.meta !== "undefined"
+    ? (import.meta as { env?: { PROD?: boolean } }).env?.PROD
+    : undefined) ??
   readEnv("NODE_ENV", "NODE_ENV", "development") === "production";
 
 export const env = {

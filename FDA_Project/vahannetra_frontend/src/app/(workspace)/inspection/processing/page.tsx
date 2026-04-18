@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -12,7 +12,7 @@ import { env } from "@/lib/env";
 const stages = ["Preprocessing image", "Detection", "Classification", "Severity scoring"];
 
 export default function ProcessingPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const [progress, setProgress] = useState(8);
   const [status, setStatus] = useState<string>(stages[0]);
   const [error, setError] = useState("");
@@ -22,7 +22,7 @@ export default function ProcessingPage() {
 
   useEffect(() => {
     if (!selectedFile) {
-      navigate("/inspection/new");
+      router.replace("/inspection/new");
       return;
     }
 
@@ -47,7 +47,7 @@ export default function ProcessingPage() {
         setResult(response);
         setProgress(100);
         setStatus("Analysis complete");
-        setTimeout(() => navigate("/inspection/result"), 700);
+        setTimeout(() => router.push("/inspection/result"), 700);
       } catch {
         if (cancelled) return;
         setError("API failure. Please retry after checking network or backend status.");
@@ -62,7 +62,7 @@ export default function ProcessingPage() {
       cancelled = true;
       clearInterval(ticker);
     };
-  }, [navigate, payload, selectedFile, setResult]);
+  }, [router, payload, selectedFile, setResult]);
 
   return (
     <div className="mx-auto max-w-xl space-y-4 pt-10">

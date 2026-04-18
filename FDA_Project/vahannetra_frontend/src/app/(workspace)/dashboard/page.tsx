@@ -1,6 +1,6 @@
 "use client";
 
-import { Link } from "react-router-dom";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, TriangleAlert } from "lucide-react";
 import { getFleetHealth, getRecentInspections } from "@/lib/api/services";
@@ -63,7 +63,7 @@ export default function DashboardPage() {
       </Card>
 
       <div className="sticky bottom-16 md:bottom-4">
-        <Link to="/inspection/new"><Button className="w-full">Start New Inspection <ArrowRight size={16} className="ml-2" /></Button></Link>
+        <Link href="/inspection/new"><Button className="w-full">Start New Inspection <ArrowRight size={16} className="ml-2" /></Button></Link>
       </div>
     </div>
   );

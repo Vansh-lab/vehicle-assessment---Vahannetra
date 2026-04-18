@@ -1,7 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { BarChart3, ClipboardList, Home, Settings, UserCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/components/providers/i18n-provider";
@@ -15,7 +16,7 @@ const links = [
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const pathname = useLocation().pathname;
+  const pathname = usePathname();
   const { locale, setLocale, t } = useI18n();
 
   return (
@@ -42,7 +43,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             return (
               <Link
                 key={link.href}
-                to={link.href}
+                href={link.href}
                 className={cn(
                   "flex items-center gap-2 rounded-xl px-3 py-2 text-sm",
                   active ? "bg-cyan-400/20 text-cyan-100" : "text-slate-300 hover:bg-white/10",
@@ -63,7 +64,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           return (
             <Link
               key={link.href}
-              to={link.href}
+              href={link.href}
               className={cn(
                 "flex flex-col items-center rounded-lg py-1 text-[11px]",
                 active ? "text-cyan-200" : "text-slate-400",

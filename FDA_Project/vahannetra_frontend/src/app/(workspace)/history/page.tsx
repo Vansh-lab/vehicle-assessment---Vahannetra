@@ -1,9 +1,9 @@
 "use client";
 
 import { type MouseEvent, useMemo, useState } from "react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
-import { Link } from "react-router-dom";
 import { downloadInspectionReport, getHistory } from "@/lib/api/services";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -83,7 +83,7 @@ export default function HistoryPage() {
 
       <div className="space-y-3">
         {filtered.map((item) => (
-          <Link key={item.id} to={`/history/${item.id}`}>
+          <Link key={item.id} href={`/history/${item.id}`}>
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
