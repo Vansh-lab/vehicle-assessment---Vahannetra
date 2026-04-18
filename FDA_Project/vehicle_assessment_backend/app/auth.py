@@ -80,6 +80,19 @@ def create_refresh_token(db: Session, user: User) -> str:
     return token
 
 
+async def create_refresh_token_async(db: AsyncSession, user: User) -> str:
+    token = secrets.token_urlsafe(48)
+    token_hash = hash_secret(token)
+    expires_at = utc_now() + timedelta(days=REFRESH_TOKEN_DAYS)
+    db.add(
+        RefreshToken(
+            token_hash=token_hash, user_id=user.id, expires_at=expires_at, revoked=False
+        )
+    )
+    await db.commit()
+    return token
+
+
 def decode_token(token: str) -> dict[str, Any]:
     try:
         payload = jwt.decode(
@@ -169,6 +182,17 @@ def require_roles(*allowed_roles: str):
     return _check
 
 
+def require_roles_async(*allowed_roles: str):
+    async def _check(user: User = Depends(get_current_user_async)) -> User:
+        if allowed_roles and user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+            )
+        return user
+
+    return _check
+
+
 def exchange_refresh_token(db: Session, refresh_token: str) -> User:
     token_hash = hash_secret(refresh_token)
     token_record = (
@@ -191,4 +215,31 @@ def exchange_refresh_token(db: Session, refresh_token: str) -> User:
 
     token_record.revoked = True
     db.commit()
+    return user
+
+
+async def exchange_refresh_token_async(db: AsyncSession, refresh_token: str) -> User:
+    token_hash = hash_secret(refresh_token)
+    token_result = await db.execute(
+        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+    )
+    token_record = token_result.scalar_one_or_none()
+    if not token_record or token_record.revoked:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
+    if ensure_utc(token_record.expires_at) < utc_now():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired"
+        )
+
+    user_result = await db.execute(select(User).where(User.id == token_record.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
+
+    token_record.revoked = True
+    await db.commit()
     return user

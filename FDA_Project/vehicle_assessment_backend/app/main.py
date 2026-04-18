@@ -20,14 +20,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import (
-    create_access_token,
-    create_refresh_token,
-    exchange_refresh_token,
     get_current_user,
     hash_password,
     hash_secret,
     require_roles,
-    verify_password,
 )
 from app.database import Base, apply_rls_policies, engine, get_db
 from app.db_models import (
@@ -38,20 +34,19 @@ from app.db_models import (
     Inspection,
     InspectionJob,
     Organization,
-    OtpCode,
-    OtpDeliveryEvent,
-    RefreshToken,
     Setting,
     User,
     Vehicle,
 )
-from app.otp_provider import get_otp_provider
 from app.pdf_reports import render_inspection_report
 from app.core.settings import settings
 from app.middleware.request_context import request_context_middleware
+from app.routers.analytics import router as analytics_router
+from app.routers.auth import router as auth_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.health import router as health_router
 from app.routers.mobility import router as mobility_router
+from app.routers.settings import router as settings_router
 from app.routers.system import router as system_router
 from app.routers.webhooks import router as webhooks_router
 from app.secrets import get_secret
@@ -63,7 +58,6 @@ from app.utils.assessment import calculate_dsi
 from app.utils.network import ensure_public_http_url
 
 detector = DamageDetector()
-otp_provider = get_otp_provider()
 storage_service = ArtifactStorageService()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -490,27 +484,6 @@ def validate_video_upload(file: UploadFile, payload: bytes) -> None:
         )
 
 
-def issue_token_bundle(
-    db: Session, user: User, organization: Organization
-) -> AuthResponse:
-    return AuthResponse(
-        access_token=create_access_token(user),
-        refresh_token=create_refresh_token(db, user),
-        issued_at=isoformat_utc_z(utc_now()),
-        user={
-            "id": user.id,
-            "name": user.name,
-            "email": user.email,
-            "role": user.role,
-        },
-        organization={
-            "id": organization.id,
-            "name": organization.name,
-            "region": organization.region,
-        },
-    )
-
-
 def to_history_item(record: Inspection) -> InspectionHistoryItem:
     return InspectionHistoryItem(
         id=record.id,
@@ -826,151 +799,9 @@ app.include_router(health_router)
 app.include_router(dashboard_router)
 app.include_router(webhooks_router)
 app.include_router(mobility_router)
-
-
-@app.post("/auth/login", response_model=AuthResponse)
-async def auth_login(payload: AuthLoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email.lower()).first()
-    if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    organization = (
-        db.query(Organization).filter(Organization.id == user.organization_id).first()
-    )
-    if not organization:
-        raise HTTPException(status_code=500, detail="Organization not found")
-
-    return issue_token_bundle(db, user, organization)
-
-
-@app.post("/auth/refresh", response_model=AuthResponse)
-async def auth_refresh(payload: AuthRefreshRequest, db: Session = Depends(get_db)):
-    user = exchange_refresh_token(db, payload.refresh_token)
-    organization = (
-        db.query(Organization).filter(Organization.id == user.organization_id).first()
-    )
-    if not organization:
-        raise HTTPException(status_code=500, detail="Organization not found")
-    return issue_token_bundle(db, user, organization)
-
-
-@app.post("/auth/logout")
-async def auth_logout(payload: LogoutRequest, db: Session = Depends(get_db)):
-    token_hash = hash_secret(payload.refresh_token)
-    token_record = (
-        db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
-    )
-    if token_record:
-        token_record.revoked = True
-        db.commit()
-    return {"message": "Logged out"}
-
-
-@app.post("/auth/forgot-password")
-async def auth_forgot_password(
-    payload: ForgotPasswordRequest, db: Session = Depends(get_db)
-):
-    user = db.query(User).filter(User.email == payload.email.lower()).first()
-    if not user:
-        return {
-            "message": "If this email exists, an OTP has been sent",
-            "otp_required": True,
-            "channel": "email",
-        }
-
-    otp_code = str(random.randint(100000, 999999))
-    db.add(
-        OtpCode(
-            email=user.email,
-            code_hash=hash_secret(otp_code),
-            purpose="forgot_password",
-            expires_at=utc_now() + timedelta(minutes=10),
-            used=False,
-        )
-    )
-    db.commit()
-
-    delivery_event = OtpDeliveryEvent(
-        email=user.email, organization_id=user.organization_id, status="pending"
-    )
-    db.add(delivery_event)
-    db.commit()
-    db.refresh(delivery_event)
-
-    send_result = otp_provider.send_otp(user.email, otp_code)
-    delivery_event.provider = send_result.provider
-    delivery_event.provider_message_id = send_result.provider_message_id
-    delivery_event.status = send_result.status
-    delivery_event.attempts = send_result.attempts
-    delivery_event.error_message = send_result.error_message
-    db.commit()
-    return {
-        "message": f"OTP sent to {user.email}",
-        "otp_required": True,
-        "channel": "email",
-    }
-
-
-@app.post("/auth/verify-otp", response_model=AuthResponse)
-async def auth_verify_otp(payload: VerifyOtpRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email.lower()).first()
-    if not user:
-        raise HTTPException(status_code=400, detail="User not found")
-
-    otp_record = (
-        db.query(OtpCode)
-        .filter(
-            OtpCode.email == user.email,
-            OtpCode.purpose == "forgot_password",
-            OtpCode.used.is_(False),
-        )
-        .order_by(OtpCode.id.desc())
-        .first()
-    )
-    if (
-        not otp_record
-        or ensure_utc(otp_record.expires_at) < utc_now()
-        or otp_record.code_hash != hash_secret(payload.otp)
-    ):
-        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
-
-    otp_record.used = True
-    db.commit()
-
-    organization = (
-        db.query(Organization).filter(Organization.id == user.organization_id).first()
-    )
-    if not organization:
-        raise HTTPException(status_code=500, detail="Organization not found")
-
-    return issue_token_bundle(db, user, organization)
-
-
-@app.post("/auth/otp/delivery-callback")
-async def auth_otp_delivery_callback(
-    payload: OtpDeliveryCallback,
-    request: Request,
-    db: Session = Depends(get_db),
-):
-    callback_secret = get_secret("OTP_CALLBACK_SECRET", "dev-callback-secret")
-    provided = request.headers.get("X-Callback-Secret")
-    if not provided or not hmac.compare_digest(provided, callback_secret):
-        raise HTTPException(status_code=401, detail="Invalid callback secret")
-
-    event = (
-        db.query(OtpDeliveryEvent)
-        .filter(OtpDeliveryEvent.provider_message_id == payload.provider_message_id)
-        .order_by(OtpDeliveryEvent.id.desc())
-        .first()
-    )
-    if not event:
-        raise HTTPException(status_code=404, detail="Delivery event not found")
-
-    event.status = payload.status
-    event.error_message = payload.error_message or ""
-    event.callback_payload = json.dumps(payload.payload or {})
-    db.commit()
-    return {"ok": True}
+app.include_router(auth_router)
+app.include_router(analytics_router)
+app.include_router(settings_router)
 
 
 @app.get("/dashboard/overview", response_model=DashboardOverviewResponse)
@@ -1218,150 +1049,6 @@ async def submit_claim(
         inspection_id=inspection.id,
         status="Submitted",
         provider_reference=provider_ref,
-    )
-
-
-@app.get("/analytics/damage-distribution")
-async def analytics_damage_distribution(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    inspections = (
-        db.query(Inspection)
-        .filter(Inspection.organization_id == current_user.organization_id)
-        .all()
-    )
-    counts = {"scratch": 0, "dent": 0, "crack": 0, "broken part": 0, "paint damage": 0}
-
-    for inspection in inspections:
-        for item in json.loads(inspection.findings_json or "[]"):
-            kind = item.get("type", "paint damage")
-            if kind not in counts:
-                kind = "paint damage"
-            counts[kind] += 1
-
-    return {
-        "items": [{"category": key, "count": value} for key, value in counts.items()]
-    }
-
-
-@app.get("/analytics/severity-trends")
-async def analytics_severity_trends(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    inspections = (
-        db.query(Inspection)
-        .filter(Inspection.organization_id == current_user.organization_id)
-        .all()
-    )
-    bucket: dict[str, dict[str, int]] = {}
-    for item in inspections:
-        month = item.date.strftime("%b")
-        if month not in bucket:
-            bucket[month] = {"low": 0, "medium": 0, "high": 0}
-        bucket[month][item.severity] += 1
-
-    trends = [{"month": month, **counts} for month, counts in bucket.items()]
-    return {"trends": trends}
-
-
-@app.get("/analytics/vehicle-risk-ranking")
-async def analytics_vehicle_risk_ranking(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    inspections = (
-        db.query(Inspection)
-        .filter(Inspection.organization_id == current_user.organization_id)
-        .all()
-    )
-    score_by_model: dict[str, list[int]] = {}
-    for item in inspections:
-        score_by_model.setdefault(item.model, []).append(item.risk_score)
-
-    ranking = [
-        {"model": model, "risk": int(sum(scores) / len(scores))}
-        for model, scores in score_by_model.items()
-        if model
-    ]
-    ranking.sort(key=lambda entry: entry["risk"], reverse=True)
-    return {"ranking": ranking}
-
-
-@app.get("/settings", response_model=SettingsResponse)
-async def get_settings(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    org = (
-        db.query(Organization)
-        .filter(Organization.id == current_user.organization_id)
-        .first()
-    )
-    setting = (
-        db.query(Setting)
-        .filter(Setting.organization_id == current_user.organization_id)
-        .first()
-    )
-    if not org or not setting:
-        raise HTTPException(status_code=404, detail="Settings not found")
-
-    return SettingsResponse(
-        organization=OrganizationInfo(
-            id=org.id,
-            name=org.name,
-            region=org.region,
-            active_inspectors=org.active_inspectors,
-        ),
-        notifications=NotificationPreferences(
-            push=setting.push, email=setting.email, critical_only=setting.critical_only
-        ),
-        theme=setting.theme,
-    )
-
-
-@app.patch("/settings", response_model=SettingsResponse)
-async def patch_settings(
-    payload: SettingsPatchRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("admin", "manager")),
-):
-    setting = (
-        db.query(Setting)
-        .filter(Setting.organization_id == current_user.organization_id)
-        .first()
-    )
-    org = (
-        db.query(Organization)
-        .filter(Organization.id == current_user.organization_id)
-        .first()
-    )
-    if not setting or not org:
-        raise HTTPException(status_code=404, detail="Settings not found")
-
-    if payload.theme is not None:
-        setting.theme = payload.theme
-
-    if payload.notifications is not None:
-        setting.push = payload.notifications.push
-        setting.email = payload.notifications.email
-        setting.critical_only = payload.notifications.critical_only
-
-    db.commit()
-    db.refresh(setting)
-
-    return SettingsResponse(
-        organization=OrganizationInfo(
-            id=org.id,
-            name=org.name,
-            region=org.region,
-            active_inspectors=org.active_inspectors,
-        ),
-        notifications=NotificationPreferences(
-            push=setting.push, email=setting.email, critical_only=setting.critical_only
-        ),
-        theme=setting.theme,
     )
 
 
