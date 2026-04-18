@@ -60,7 +60,7 @@ function PricingTable({
               <td className="py-1 pr-2">₹{pricing[row.key].min.toLocaleString()} - ₹{pricing[row.key].max.toLocaleString()}</td>
               <td className="py-1 pr-2">{market ? `₹${market.market_avg.toLocaleString()}` : "-"}</td>
               <td className="py-1 pr-2">{market ? `${market.delta_pct}%` : "-"}</td>
-              <td className="py-1 pr-2 uppercase">{market?.verdict?.replace(/_/g, " ") || "-"}</td>
+              <td className="py-1 pr-2 uppercase">{market?.verdict?.replace("_", " ") || "-"}</td>
             </tr>
           );
         })}

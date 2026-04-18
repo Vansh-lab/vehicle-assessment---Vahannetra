@@ -40,7 +40,8 @@ export default function HistoryPage() {
           message: "This will generate and open the signed inspection PDF report.",
         });
     if (!accepted) return;
-    await downloadInspectionReport(inspectionId);
+    const url = await downloadInspectionReport(inspectionId);
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   return (

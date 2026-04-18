@@ -5,17 +5,6 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
-BLOCKCHAIN_HASH_DISPLAY_LENGTH = 20
-
-
-def _truncate_hash(
-    hash_str: str | None, length: int = BLOCKCHAIN_HASH_DISPLAY_LENGTH
-) -> str:
-    value = (hash_str or "n/a").strip()
-    if len(value) <= length:
-        return value
-    return f"{value[:length]}..."
-
 
 def _draw_bar_chart(
     pdf: canvas.Canvas, x: float, y: float, width: float, values: list[float]
@@ -115,7 +104,7 @@ def render_inspection_report(payload: dict) -> bytes:
     pdf.drawRightString(
         width - 12 * mm,
         11 * mm,
-        f"Blockchain SHA-256: {_truncate_hash(payload.get('blockchain_hash'))}",
+        f"Blockchain SHA-256: {payload.get('blockchain_hash', 'n/a')[:20]}...",
     )
 
     pdf.showPage()

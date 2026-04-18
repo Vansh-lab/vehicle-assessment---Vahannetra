@@ -17,7 +17,6 @@ from app.db_models import (
 
 MAX_PLATE_LENGTH = 12
 MIN_VIN_LENGTH = 17
-# City-neutral market baseline used to derive realistic garage price bands by workshop type.
 MARKET = {"scratch": 3500, "dent": 8000, "paint": 6000, "major": 25000}
 
 
@@ -91,8 +90,11 @@ def _price_band(workshop_type: str, seed: int) -> dict[str, int]:
     dent_min, dent_max = span(MARKET["dent"], 1.55)
     paint_min, paint_max = span(MARKET["paint"], 1.5)
     major_min, major_max = span(MARKET["major"], 1.45)
-    rates = {"local": 350, "multi-brand": 450, "authorized": 700}
-    labour = int(rates.get(workshop_type, 700))
+    labour = int(
+        350
+        if workshop_type == "local"
+        else 450 if workshop_type == "multi-brand" else 700
+    )
     return {
         "pricing_scratch_min": scratch_min,
         "pricing_scratch_max": scratch_max,
