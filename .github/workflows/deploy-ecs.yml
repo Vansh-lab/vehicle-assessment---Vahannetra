@@ -31,7 +31,7 @@ jobs:
     name: Build and push backend/frontend images
     runs-on: ubuntu-latest
     outputs:
-      deploy_enabled: ${{ steps.deploy-ready.outputs.deploy_enabled }}
+      deploy_enabled: ${{ steps.deploy-toggle.outputs.deploy_enabled }}
       backend_image: ${{ steps.meta.outputs.backend_image }}
       frontend_image: ${{ steps.meta.outputs.frontend_image }}
     steps:
@@ -49,32 +49,19 @@ jobs:
           fi
 
       - name: Configure AWS credentials
-        id: aws-creds
         if: ${{ steps.deploy-toggle.outputs.deploy_enabled == 'true' }}
-        continue-on-error: true
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Finalize deploy readiness
-        id: deploy-ready
-        run: |
-          if [[ "${{ steps.deploy-toggle.outputs.deploy_enabled }}" != "true" ]]; then
-            echo "deploy_enabled=false" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ steps.aws-creds.outcome }}" != "success" ]]; then
-            echo "deploy_enabled=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "deploy_enabled=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Login to Amazon ECR
-        if: ${{ steps.deploy-ready.outputs.deploy_enabled == 'true' }}
+        if: ${{ steps.deploy-toggle.outputs.deploy_enabled == 'true' }}
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build + push backend image
-        if: ${{ steps.deploy-ready.outputs.deploy_enabled == 'true' }}
+        if: ${{ steps.deploy-toggle.outputs.deploy_enabled == 'true' }}
         working-directory: FDA_Project/vehicle_assessment_backend
         run: |
           BACKEND_IMAGE=${{ steps.ecr.outputs.registry }}/${{ env.BACKEND_IMAGE_REPO }}:${{ github.sha }}
@@ -83,7 +70,7 @@ jobs:
           echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
 
       - name: Build + push frontend image
-        if: ${{ steps.deploy-ready.outputs.deploy_enabled == 'true' }}
+        if: ${{ steps.deploy-toggle.outputs.deploy_enabled == 'true' }}
         working-directory: FDA_Project/vahannetra_frontend
         run: |
           FRONTEND_IMAGE=${{ steps.ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE_REPO }}:${{ github.sha }}
@@ -93,14 +80,14 @@ jobs:
 
       - name: Export image metadata
         id: meta
-        if: ${{ steps.deploy-ready.outputs.deploy_enabled == 'true' }}
+        if: ${{ steps.deploy-toggle.outputs.deploy_enabled == 'true' }}
         run: |
           echo "backend_image=${BACKEND_IMAGE}" >> $GITHUB_OUTPUT
           echo "frontend_image=${FRONTEND_IMAGE}" >> $GITHUB_OUTPUT
 
-      - name: Skip deploy path (AWS prerequisites not ready)
-        if: ${{ steps.deploy-ready.outputs.deploy_enabled != 'true' }}
-        run: echo "Deploy prerequisites are not ready (deploy disabled or AWS prerequisites unavailable). Skipping deploy workflow path."
+      - name: Skip deploy path (AWS role not configured)
+        if: ${{ steps.deploy-toggle.outputs.deploy_enabled != 'true' }}
+        run: echo "AWS_ROLE_TO_ASSUME is not configured. Skipping deploy workflow path."
 
   deploy:
     name: Deploy to ECS

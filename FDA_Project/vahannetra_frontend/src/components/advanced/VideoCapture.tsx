@@ -11,7 +11,7 @@ interface VideoCaptureProps {
 
 type PermissionState = "idle" | "requesting" | "granted" | "denied";
 
-function VideoCapture({ onVideoReady, onCapture }: VideoCaptureProps) {
+export function VideoCapture({ onVideoReady, onCapture }: VideoCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);

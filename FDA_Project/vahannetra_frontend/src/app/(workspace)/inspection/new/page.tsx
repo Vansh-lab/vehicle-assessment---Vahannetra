@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { InspectionStepper } from "@/components/inspection/inspection-stepper";
 import { PhotoUpload } from "@/components/inspection/photo-upload";
-import VideoCapture from "@/components/advanced/VideoCapture";
+import { VideoCapture } from "@/components/advanced/VideoCapture";
 
 const vehicleTypes: VehicleType[] = ["Motorcycle", "Scooter", "3W", "4W"];
 const angles: CaptureAngle[] = ["Front", "Rear", "Left", "Right", "Top", "Interior", "Engine"];

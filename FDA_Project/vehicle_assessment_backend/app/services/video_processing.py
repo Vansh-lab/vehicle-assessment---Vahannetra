@@ -22,12 +22,7 @@ class VideoExtractionResult:
     extracted_frames: list[VideoFrame]
 
 
-def extract_best_frames(
-    video_path: Path,
-    output_dir: Path,
-    n_frames: int = 6,
-    sharpness_threshold: float = 100.0,
-) -> VideoExtractionResult:
+def extract_best_frames(video_path: Path, output_dir: Path, n_frames: int = 6, sharpness_threshold: float = 100.0) -> VideoExtractionResult:
     output_dir.mkdir(parents=True, exist_ok=True)
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
@@ -66,12 +61,6 @@ def extract_best_frames(
     for idx, (sharpness, timestamp_sec, frame) in enumerate(selected):
         frame_path = output_dir / f"frame_{idx + 1}.jpg"
         cv2.imwrite(str(frame_path), frame)
-        extracted.append(
-            VideoFrame(
-                sharpness=sharpness, timestamp_sec=timestamp_sec, frame_path=frame_path
-            )
-        )
+        extracted.append(VideoFrame(sharpness=sharpness, timestamp_sec=timestamp_sec, frame_path=frame_path))
 
-    return VideoExtractionResult(
-        duration_seconds=duration_seconds, fps=fps, extracted_frames=extracted
-    )
+    return VideoExtractionResult(duration_seconds=duration_seconds, fps=fps, extracted_frames=extracted)

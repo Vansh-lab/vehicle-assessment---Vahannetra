@@ -108,10 +108,6 @@ export function GeoVoiceReportPanel({ findings, triageCategory, healthScore }: G
     pdf.text(`Findings: ${findings.length}`, 14, 34);
     pdf.text(`Location: ${locationLabel}`, 14, 40, { maxWidth: 180 });
 
-    const PDF_HEIGHT_MM = 297;
-    const FOOTER_BUFFER_MM = 17;
-    const maxPdfYPosition = PDF_HEIGHT_MM - FOOTER_BUFFER_MM;
-
     let y = 50;
     pdf.setFontSize(11);
     pdf.text("Findings Table", 14, y);
@@ -124,7 +120,7 @@ export function GeoVoiceReportPanel({ findings, triageCategory, healthScore }: G
         y,
       );
       y += 5;
-      if (y > maxPdfYPosition) {
+      if (y > 280) {
         pdf.addPage();
         y = 20;
       }

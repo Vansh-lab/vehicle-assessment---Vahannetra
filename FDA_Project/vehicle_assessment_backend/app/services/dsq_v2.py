@@ -136,9 +136,7 @@ def compute_dsq_v2(
     }
 
     for item in findings:
-        damage_type = _normalized_detection_type(
-            str(item.get("type") or item.get("class") or "")
-        )
+        damage_type = _normalized_detection_type(str(item.get("type") or item.get("class") or ""))
         severity = _normalized_severity(str(item.get("severity") or "medium"))
         severity_factor = SEVERITY_WEIGHTS[severity]
 
@@ -149,12 +147,8 @@ def compute_dsq_v2(
         confidence = max(0.0, min(1.0, float(item.get("confidence", 0.0))))
 
         component_totals["area_ratio"] += W_AREA * area_ratio * severity_factor
-        component_totals["part_criticality"] += (
-            W_CRITICALITY * criticality * severity_factor
-        )
-        component_totals["functional_impact"] += (
-            W_FUNCTIONAL * functional * severity_factor
-        )
+        component_totals["part_criticality"] += W_CRITICALITY * criticality * severity_factor
+        component_totals["functional_impact"] += W_FUNCTIONAL * functional * severity_factor
         component_totals["confidence"] += W_CONFIDENCE * confidence * severity_factor
 
     breakdown = _normalize_breakdown(component_totals)
