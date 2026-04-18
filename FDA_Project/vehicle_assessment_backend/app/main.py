@@ -422,6 +422,9 @@ def create_job_from_findings(
 ) -> InspectionJob:
     score = float(calculate_dsi(findings, (720, 1280, 3))) if findings else 0.0
     severity = "high" if score >= 67 else "medium" if score >= 34 else "low"
+    hash_payload = f"{organization_id}:{score}:{utc_now().isoformat()}"
+    hash_secret_key = (get_secret("VAHANNETRA_HASH_SECRET", "vahannetra-hash-secret") or "").encode("utf-8")
+    hash_value = hmac.new(hash_secret_key, hash_payload.encode("utf-8"), hashlib.sha256).hexdigest()
     job = InspectionJob(
         id=f"JOB-{uuid.uuid4().hex[:12].upper()}",
         organization_id=organization_id,
@@ -441,7 +444,7 @@ def create_job_from_findings(
         repair_cost_max_inr=7000 if score < 34 else 22000 if score < 67 else 55000,
         recommendation="Proceed with repair estimate and insurer review.",
         insurance_claim_steps="Upload RC, policy, and inspection images. Submit claim and await surveyor review.",
-        blockchain_hash=hashlib.sha256(f"{organization_id}:{score}:{utc_now().isoformat()}".encode("utf-8")).hexdigest(),
+        blockchain_hash=hash_value,
         completed_at=utc_now() if status == "completed" else None,
     )
     db.add(job)

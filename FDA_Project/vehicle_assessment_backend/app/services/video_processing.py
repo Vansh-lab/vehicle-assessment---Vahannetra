@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from heapq import heappop, heappush
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,7 @@ def extract_best_frames(video_path: Path, output_dir: Path, n_frames: int = 6, s
     total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     duration_seconds = int(total_frames / fps) if total_frames > 0 else 0
 
-    candidates: list[tuple[float, int, Any]] = []
+    top_candidates: list[tuple[float, int, Any]] = []
     frame_index = 0
     while capture.isOpened():
         ok, frame = capture.read()
@@ -45,12 +46,16 @@ def extract_best_frames(video_path: Path, output_dir: Path, n_frames: int = 6, s
             sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
             if sharpness > sharpness_threshold:
                 timestamp_sec = int(frame_index / fps)
-                candidates.append((sharpness, timestamp_sec, frame.copy()))
+                candidate = (sharpness, timestamp_sec, frame.copy())
+                if len(top_candidates) < n_frames:
+                    heappush(top_candidates, candidate)
+                elif top_candidates[0][0] < sharpness:
+                    heappop(top_candidates)
+                    heappush(top_candidates, candidate)
         frame_index += 1
     capture.release()
 
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    selected = candidates[:n_frames]
+    selected = sorted(top_candidates, key=lambda item: item[0], reverse=True)
 
     extracted: list[VideoFrame] = []
     for idx, (sharpness, timestamp_sec, frame) in enumerate(selected):

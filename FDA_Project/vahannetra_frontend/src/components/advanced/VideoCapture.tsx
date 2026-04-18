@@ -23,6 +23,7 @@ export function VideoCapture({ onCapture }: VideoCaptureProps) {
   const [duration, setDuration] = useState(0);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [captureError, setCaptureError] = useState("");
   const MAX_DURATION = 30;
 
   const clearPreview = useCallback(() => {
@@ -69,7 +70,17 @@ export function VideoCapture({ onCapture }: VideoCaptureProps) {
   const startRecording = useCallback(() => {
     if (!(streamRef.current instanceof MediaStream)) return;
     chunksRef.current = [];
-    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm";
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+      ? "video/webm;codecs=vp9"
+      : MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
+        ? "video/webm;codecs=vp8"
+        : MediaRecorder.isTypeSupported("video/webm")
+          ? "video/webm"
+          : "";
+    if (!mimeType) {
+      setCaptureError("Recording is not supported in this browser. Please upload a video file.");
+      return;
+    }
     const recorder = new MediaRecorder(streamRef.current, { mimeType });
     mediaRecorderRef.current = recorder;
     recorder.ondataavailable = (event) => {
@@ -85,6 +96,7 @@ export function VideoCapture({ onCapture }: VideoCaptureProps) {
     };
     recorder.start(100);
     setDuration(0);
+    setCaptureError("");
     setStopped(false);
     setRecording(true);
   }, [clearPreview]);
@@ -149,6 +161,8 @@ export function VideoCapture({ onCapture }: VideoCaptureProps) {
           />
         </div>
       ) : null}
+
+      {captureError ? <p className="text-xs text-rose-200">{captureError}</p> : null}
 
       {permission === "granted" && !stopped ? (
         <>
