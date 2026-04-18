@@ -17,16 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.database import engine
 from app.db_models import (
-    Garage,
-    InsuranceCenter,
     Inspection,
     InspectionJob,
-    Organization,
-    Setting,
-    User,
-    Vehicle,
 )
 from app.core.settings import settings
 from app.middleware.request_context import request_context_middleware

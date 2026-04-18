@@ -21,7 +21,9 @@ class ArtifactStorageService:
     def __init__(self, bucket: str | None = None):
         self.bucket = bucket or settings.s3_bucket
 
-    async def upload_bytes(self, key: str, data: bytes, content_type: str) -> StorageObject:
+    async def upload_bytes(
+        self, key: str, data: bytes, content_type: str
+    ) -> StorageObject:
         if os.getenv("AWS_ACCESS_KEY_ID") and os.getenv("AWS_SECRET_ACCESS_KEY"):
             try:
                 import aioboto3  # type: ignore
@@ -29,7 +31,9 @@ class ArtifactStorageService:
                 session = aioboto3.Session()
                 region = os.getenv("AWS_REGION", "ap-south-1")
                 async with session.client("s3", region_name=region) as s3:
-                    await s3.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)
+                    await s3.put_object(
+                        Bucket=self.bucket, Key=key, Body=data, ContentType=content_type
+                    )
                 return StorageObject(key=key, url=f"s3://{self.bucket}/{key}")
             except Exception:
                 pass

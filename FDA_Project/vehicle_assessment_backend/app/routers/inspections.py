@@ -367,7 +367,9 @@ async def download_report(
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="{inspection_id}.pdf"',
-            "X-Report-Signature": hash_secret(inspection_id + str(record.date.timestamp())),
+            "X-Report-Signature": hash_secret(
+                inspection_id + str(record.date.timestamp())
+            ),
             "X-Blockchain-Hash": blockchain_hash,
         },
     )
