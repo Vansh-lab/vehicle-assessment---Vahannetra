@@ -2,9 +2,10 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useSyncExternalStore } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router-dom";
 import { isSessionActive } from "@/lib/auth/session";
 import { Card } from "@/components/ui/card";
+import { env } from "@/lib/env";
 
 function subscribeSession(onStoreChange: () => void) {
   if (typeof window === "undefined") {
@@ -24,8 +25,8 @@ function subscribeSession(onStoreChange: () => void) {
 }
 
 export function AuthGuard({ children }: { children: ReactNode }) {
-  const bypassAuth = process.env.NEXT_PUBLIC_E2E_BYPASS_AUTH === "true";
-  const router = useRouter();
+  const bypassAuth = env.E2E_BYPASS_AUTH;
+  const navigate = useNavigate();
   const active = useSyncExternalStore(
     subscribeSession,
     () => (bypassAuth ? true : isSessionActive()),
@@ -34,9 +35,9 @@ export function AuthGuard({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!bypassAuth && active === false) {
-      router.replace("/login");
+      navigate("/login", { replace: true });
     }
-  }, [active, bypassAuth, router]);
+  }, [active, bypassAuth, navigate]);
 
   if (bypassAuth) {
     return <>{children}</>;

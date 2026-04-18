@@ -28,7 +28,6 @@ export function AnnotatedImageViewer({ imageUrl, findings, heatmapEnabled }: Ann
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-950/70">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={imageUrl} alt="Annotated vehicle" className="h-64 w-full object-cover md:h-80" />
 
       {heatmapEnabled ? <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_45%,rgba(255,90,122,0.28),transparent_35%),radial-gradient(circle_at_65%_42%,rgba(255,182,72,0.26),transparent_30%)]" /> : null}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { InspectionStepper } from "@/components/inspection/inspection-stepper";
 import { PhotoUpload } from "@/components/inspection/photo-upload";
+import { VideoCapture } from "@/components/advanced/VideoCapture";
 
 const vehicleTypes: VehicleType[] = ["Motorcycle", "Scooter", "3W", "4W"];
 const angles: CaptureAngle[] = ["Front", "Rear", "Left", "Right", "Top", "Interior", "Engine"];
@@ -27,7 +28,7 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 export default function NewInspectionPage() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [vehicleType, setVehicleType] = useState<VehicleType>("4W");
   const [selectedAngles, setSelectedAngles] = useState<CaptureAngle[]>(["Front"]);
@@ -43,7 +44,7 @@ export default function NewInspectionPage() {
     if (!selectedFile) return;
     setVehicleInfo({ vehicleType, plate: values.plate, model: values.model, vin: values.vin });
     setAngles(selectedAngles);
-    router.push("/inspection/processing");
+    navigate("/inspection/processing");
   };
 
   return (
@@ -105,6 +106,7 @@ export default function NewInspectionPage() {
       {step === 3 ? (
         <div className="space-y-4">
           <PhotoUpload file={selectedFile} onFileChange={setFile} />
+          <VideoCapture onCapture={(videoFile) => setFile(videoFile)} />
           <div className="sticky bottom-16 space-y-2 md:bottom-4">
             <Button className="w-full" disabled={!selectedFile} onClick={submitInspection}>Analyze Damage</Button>
             {!selectedFile ? <p className="text-center text-xs text-slate-400">Upload at least one image to continue.</p> : null}

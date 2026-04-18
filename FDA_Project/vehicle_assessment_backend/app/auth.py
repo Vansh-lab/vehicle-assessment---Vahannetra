@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -8,16 +7,18 @@ from typing import Any
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.database import get_db, set_org_context
+from app.core.settings import settings
+from app.database import get_async_db, get_db, set_org_context, set_org_context_async
 from app.db_models import RefreshToken, User
-from app.secrets import get_secret
 
-JWT_SECRET = get_secret("VAHANNETRA_JWT_SECRET", "change-me-in-production-very-long-secret-key-32chars") or ""
-JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_MINUTES = int(os.getenv("VAHANNETRA_ACCESS_TOKEN_MINUTES", "30"))
-REFRESH_TOKEN_DAYS = int(os.getenv("VAHANNETRA_REFRESH_TOKEN_DAYS", "14"))
+JWT_SECRET = settings.jwt_secret or ""
+JWT_ALGORITHM = settings.jwt_algorithm
+ACCESS_TOKEN_MINUTES = settings.access_token_minutes
+REFRESH_TOKEN_DAYS = settings.refresh_token_days
 
 security = HTTPBearer(auto_error=False)
 
@@ -37,7 +38,9 @@ def hash_secret(value: str) -> str:
 def hash_password(password: str, salt: str | None = None) -> str:
     if salt is None:
         salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120_000)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), 120_000
+    )
     return f"{salt}${digest.hex()}"
 
 
@@ -68,8 +71,25 @@ def create_refresh_token(db: Session, user: User) -> str:
     token = secrets.token_urlsafe(48)
     token_hash = hash_secret(token)
     expires_at = utc_now() + timedelta(days=REFRESH_TOKEN_DAYS)
-    db.add(RefreshToken(token_hash=token_hash, user_id=user.id, expires_at=expires_at, revoked=False))
+    db.add(
+        RefreshToken(
+            token_hash=token_hash, user_id=user.id, expires_at=expires_at, revoked=False
+        )
+    )
     db.commit()
+    return token
+
+
+async def create_refresh_token_async(db: AsyncSession, user: User) -> str:
+    token = secrets.token_urlsafe(48)
+    token_hash = hash_secret(token)
+    expires_at = utc_now() + timedelta(days=REFRESH_TOKEN_DAYS)
+    db.add(
+        RefreshToken(
+            token_hash=token_hash, user_id=user.id, expires_at=expires_at, revoked=False
+        )
+    )
+    await db.commit()
     return token
 
 
@@ -83,7 +103,9 @@ def decode_token(token: str) -> dict[str, Any]:
         )
         return payload
     except jwt.PyJWTError as exc:  # pragma: no cover - library branch
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        ) from exc
 
 
 def get_current_user(
@@ -91,27 +113,81 @@ def get_current_user(
     db: Session = Depends(get_db),
 ) -> User:
     if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization"
+        )
 
     payload = decode_token(credentials.credentials)
     if payload.get("type") != "access":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type"
+        )
 
     user = db.query(User).filter(User.id == payload.get("sub")).first()
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
 
     if user.organization_id != payload.get("org_id"):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Organization scope mismatch")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Organization scope mismatch",
+        )
 
     set_org_context(db, user.organization_id)
+    return user
+
+
+async def get_current_user_async(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_async_db),
+) -> User:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization"
+        )
+
+    payload = decode_token(credentials.credentials)
+    if payload.get("type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type"
+        )
+
+    result = await db.execute(select(User).where(User.id == payload.get("sub")))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
+
+    if user.organization_id != payload.get("org_id"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Organization scope mismatch",
+        )
+
+    await set_org_context_async(db, user.organization_id)
     return user
 
 
 def require_roles(*allowed_roles: str):
     def _check(user: User = Depends(get_current_user)) -> User:
         if allowed_roles and user.role not in allowed_roles:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+            )
+        return user
+
+    return _check
+
+
+def require_roles_async(*allowed_roles: str):
+    async def _check(user: User = Depends(get_current_user_async)) -> User:
+        if allowed_roles and user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+            )
         return user
 
     return _check
@@ -119,16 +195,51 @@ def require_roles(*allowed_roles: str):
 
 def exchange_refresh_token(db: Session, refresh_token: str) -> User:
     token_hash = hash_secret(refresh_token)
-    token_record = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
+    token_record = (
+        db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
+    )
     if not token_record or token_record.revoked:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
     if ensure_utc(token_record.expires_at) < utc_now():
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired"
+        )
 
     user = db.query(User).filter(User.id == token_record.user_id).first()
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
 
     token_record.revoked = True
     db.commit()
+    return user
+
+
+async def exchange_refresh_token_async(db: AsyncSession, refresh_token: str) -> User:
+    token_hash = hash_secret(refresh_token)
+    token_result = await db.execute(
+        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+    )
+    token_record = token_result.scalar_one_or_none()
+    if not token_record or token_record.revoked:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
+    if ensure_utc(token_record.expires_at) < utc_now():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired"
+        )
+
+    user_result = await db.execute(select(User).where(User.id == token_record.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
+
+    token_record.revoked = True
+    await db.commit()
     return user

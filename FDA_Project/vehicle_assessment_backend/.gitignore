@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 *.db
 .pytest_cache/
+
+uploads/*.webm
+uploads/sample.webm

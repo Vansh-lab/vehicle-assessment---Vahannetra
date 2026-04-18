@@ -3,7 +3,7 @@
 Premium, mobile-first UI for AI vehicle damage detection workflows.
 
 ## Tech Stack
-- Next.js (App Router) + TypeScript
+- React + Vite + TypeScript
 - Tailwind CSS
 - React Query + Zustand
 - React Hook Form + Zod
@@ -20,12 +20,14 @@ npm run dev
 
 Set env (optional):
 ```bash
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-NEXT_PUBLIC_USE_BACKEND=true
+VITE_API_BASE_URL=http://localhost:8000
+VITE_USE_BACKEND=true
+VITE_NOMINATIM_CONTACT_EMAIL=ops@example.com
 ```
 
-- `NEXT_PUBLIC_USE_BACKEND=true` enables real API call to `POST /assess-damage/`
+- `VITE_USE_BACKEND=true` enables real API call to `POST /assess-damage/`
 - otherwise mock API data is used for prototype flow
+- `VITE_NOMINATIM_CONTACT_EMAIL` identifies your application for OSM Nominatim reverse-geocode usage
 
 ## Information Architecture
 - Auth

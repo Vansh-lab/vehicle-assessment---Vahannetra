@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download, FileUp, Flame, ShieldCheck } from "lucide-react";
 import { useInspectionStore } from "@/store/inspection-store";
 import { mockInspectionResult } from "@/lib/api/mock-data";
-import { downloadInspectionReport, submitClaim } from "@/lib/api/services";
+import { downloadInspectionReport, getNearbyGarages, submitClaim } from "@/lib/api/services";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,13 +14,20 @@ import { AnnotatedImageViewer } from "@/components/results/annotated-image-viewe
 import { DamageCard } from "@/components/results/damage-card";
 import { ConfidenceMeter } from "@/components/results/confidence-meter";
 import { CostEstimateWidget } from "@/components/results/cost-estimate-widget";
+import { CarHeatmap } from "@/components/advanced/CarHeatmap";
+import { DSQChart } from "@/components/advanced/DSQChart";
+import { PartGraph } from "@/components/advanced/PartGraph";
+import { DamageReport } from "@/components/advanced/DamageReport";
+import { NearbyServices } from "@/components/advanced/NearbyServices";
+import { BeforeAfterSlider } from "@/components/advanced/BeforeAfterSlider";
 import { useConfirm } from "@/components/providers/confirm-provider";
+import { env } from "@/lib/env";
 
 export default function ResultPage() {
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
   const [claimMessage, setClaimMessage] = useState("");
   const { confirm } = useConfirm();
-  const bypassConfirm = process.env.NEXT_PUBLIC_E2E_BYPASS_CONFIRM === "true";
+  const bypassConfirm = env.E2E_BYPASS_CONFIRM;
   const { latestResult } = useInspectionStore();
   const result = latestResult ?? mockInspectionResult;
 
@@ -64,6 +71,20 @@ export default function ResultPage() {
       }, {}),
     [result.findings],
   );
+  const partGraphData = useMemo(
+    () =>
+      Object.entries(groupedCount).map(([part, impact]) => ({
+        part,
+        impact,
+      })),
+    [groupedCount],
+  );
+  const topDamageType = result.findings[0]?.type ?? "major";
+
+  const garagesQuery = useQuery({
+    queryKey: ["nearby-garages", topDamageType],
+    queryFn: () => getNearbyGarages({ lat: 19.07, lng: 72.87, sort: "smart_score", damageType: topDamageType }),
+  });
 
   return (
     <div className="space-y-4 pb-4">
@@ -101,6 +122,7 @@ export default function ResultPage() {
       <div className="grid gap-3 md:grid-cols-2">
         <Card className="space-y-4">
           <ConfidenceMeter confidence={confidence} />
+          <DSQChart score={100 - result.healthScore} />
           <div className="flex items-center gap-2 text-sm text-slate-200">
             <Flame size={16} className="text-amber-300" /> Severity badge: <Badge>{result.findings.some((item) => item.severity === "high") ? "High" : "Moderate"}</Badge>
           </div>
@@ -108,7 +130,21 @@ export default function ResultPage() {
         <CostEstimateWidget min={costRange.min} max={costRange.max} />
       </div>
 
+      <div className="grid gap-3 md:grid-cols-2">
+        <CarHeatmap findings={result.findings} />
+        <PartGraph items={partGraphData} />
+      </div>
+
+      <BeforeAfterSlider beforeUrl="/favicon.ico" afterUrl={result.processedImageUrl} />
+
+      <NearbyServices
+        items={garagesQuery.data ?? []}
+        damageType={topDamageType}
+      />
+
       <div className="grid gap-3">{result.findings.map((finding) => <DamageCard key={finding.id} finding={finding} />)}</div>
+
+      <DamageReport findings={result.findings} />
 
       <Card>
         <p className="text-sm font-semibold text-slate-100">Explainability</p>

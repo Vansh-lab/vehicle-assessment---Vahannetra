@@ -95,4 +95,51 @@ export interface SettingsResponse {
   theme: "dark" | "light";
 }
 
+export interface VideoAnalyzeAccepted {
+  job_id: string;
+  status: string;
+  message: string;
+  estimated_seconds?: number;
+}
+
+export interface VideoResultPayload {
+  job_id: string;
+  status: string;
+  input_type: string;
+  dsq_score: number;
+  overall_severity: "low" | "medium" | "high";
+  confidence_overall: number;
+  repair_cost_min_inr: number;
+  repair_cost_max_inr: number;
+  dsq_breakdown?: Record<string, number>;
+}
+
+export interface NearbyGarage {
+  id: string;
+  name: string;
+  address: string;
+  city?: string;
+  phone?: string;
+  latitude?: number;
+  longitude?: number;
+  distance_km: number;
+  rating: number;
+  is_open_now: boolean;
+  smart_score: number;
+  workshop_type?: string;
+  services: string[];
+  certifications?: string[];
+  years_in_business?: number;
+  hourly_labour_rate?: number;
+  pricing: {
+    scratch: { min: number; max: number };
+    dent: { min: number; max: number };
+    paint: { min: number; max: number };
+    major: { min: number; max: number };
+  };
+  market_comparison?: Record<string, { market_avg: number; delta_pct: number; verdict: string }>;
+  price_badge?: string;
+  google_maps_url?: string;
+}
+
 export type ResultResponse = InspectionResult;
