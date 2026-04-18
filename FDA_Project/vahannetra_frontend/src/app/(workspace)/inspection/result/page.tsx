@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download, FileUp, Flame, ShieldCheck } from "lucide-react";
 import { useInspectionStore } from "@/store/inspection-store";
 import { mockInspectionResult } from "@/lib/api/mock-data";
-import { downloadInspectionReport, submitClaim } from "@/lib/api/services";
+import { downloadInspectionReport, getNearbyGarages, submitClaim } from "@/lib/api/services";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,12 @@ export default function ResultPage() {
       })),
     [groupedCount],
   );
+  const topDamageType = result.findings[0]?.type ?? "major";
+
+  const garagesQuery = useQuery({
+    queryKey: ["nearby-garages", topDamageType],
+    queryFn: () => getNearbyGarages({ lat: 19.07, lng: 72.87, sort: "smart_score", damageType: topDamageType }),
+  });
 
   return (
     <div className="space-y-4 pb-4">
@@ -131,11 +137,8 @@ export default function ResultPage() {
       <BeforeAfterSlider beforeUrl="/favicon.ico" afterUrl={result.processedImageUrl} />
 
       <NearbyServices
-        items={[
-          { id: "g1", name: "AutoFix Prime", distanceKm: 2.1, dent: "₹3k-₹6k", scratch: "₹1k-₹2.5k", paint: "₹4k-₹8k", rating: 4.5 },
-          { id: "g2", name: "Shield Motors", distanceKm: 3.4, dent: "₹2.8k-₹5.8k", scratch: "₹900-₹2.2k", paint: "₹3.8k-₹7.5k", rating: 4.3 },
-          { id: "g3", name: "Rapid BodyWorks", distanceKm: 4.2, dent: "₹3.2k-₹6.5k", scratch: "₹1.2k-₹2.8k", paint: "₹4.5k-₹8.2k", rating: 4.1 },
-        ]}
+        items={garagesQuery.data ?? []}
+        damageType={topDamageType}
       />
 
       <div className="grid gap-3">{result.findings.map((finding) => <DamageCard key={finding.id} finding={finding} />)}</div>

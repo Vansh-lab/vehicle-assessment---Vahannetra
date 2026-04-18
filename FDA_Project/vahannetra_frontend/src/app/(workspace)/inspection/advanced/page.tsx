@@ -27,9 +27,44 @@ export default function AdvancedInspectionPage() {
         <CarHeatmap findings={result.findings} />
         <NearbyServices
           items={[
-            { id: "g1", name: "AutoFix Prime", distanceKm: 2.1, dent: "₹3k-₹6k", scratch: "₹1k-₹2.5k", paint: "₹4k-₹8k", rating: 4.5 },
-            { id: "g2", name: "Shield Motors", distanceKm: 3.4, dent: "₹2.8k-₹5.8k", scratch: "₹900-₹2.2k", paint: "₹3.8k-₹7.5k", rating: 4.3 },
+            {
+              id: "g1",
+              name: "AutoFix Prime",
+              address: "Andheri East, Mumbai",
+              city: "Mumbai",
+              distance_km: 2.1,
+              rating: 4.5,
+              is_open_now: true,
+              smart_score: 82,
+              services: ["Dent repair", "Paint work"],
+              pricing: {
+                scratch: { min: 1500, max: 3200 },
+                dent: { min: 3400, max: 7800 },
+                paint: { min: 4200, max: 8500 },
+                major: { min: 15000, max: 31000 },
+              },
+              market_comparison: { dent: { market_avg: 8000, delta_pct: -8, verdict: "below_market" } },
+              price_badge: "BELOW MARKET",
+            },
+            {
+              id: "g2",
+              name: "Shield Motors",
+              address: "Powai, Mumbai",
+              city: "Mumbai",
+              distance_km: 3.4,
+              rating: 4.3,
+              is_open_now: true,
+              smart_score: 78,
+              services: ["Scratch", "Dent", "Insurance approved"],
+              pricing: {
+                scratch: { min: 1800, max: 3600 },
+                dent: { min: 3600, max: 8200 },
+                paint: { min: 4300, max: 8800 },
+                major: { min: 16000, max: 32000 },
+              },
+            },
           ]}
+          damageType={result.findings[0]?.type}
         />
       </div>
       <div className="space-y-3">

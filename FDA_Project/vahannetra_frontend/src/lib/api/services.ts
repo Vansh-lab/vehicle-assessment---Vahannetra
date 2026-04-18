@@ -4,10 +4,13 @@ import type {
   BackendAssessDamageResponse,
   ClaimSubmitResponse,
   FleetHealth,
+  NearbyGarage,
   NewInspectionPayload,
   NotificationPreferences,
   ResultResponse,
   SettingsResponse,
+  VideoAnalyzeAccepted,
+  VideoResultPayload,
 } from "@/lib/api/types";
 import { API_BASE_URL, apiBinaryRequest, apiRequest } from "@/lib/api/client";
 import {
@@ -200,6 +203,62 @@ export async function assessDamageWithBackend(
       explainability: `Detected ${item.class} based on contour and texture anomalies from selected inspection angle(s).`,
       box: item.box,
     })),
+  };
+}
+
+export async function analyzeVideoWithBackend(
+  file: File,
+  payload: NewInspectionPayload,
+): Promise<ResultResponse> {
+  if (!USE_BACKEND) return assessDamageMock(payload);
+
+  const formData = new FormData();
+  formData.append("file", file);
+  const accepted = await apiRequest<VideoAnalyzeAccepted>("/api/v1/analyze/video", {
+    method: "POST",
+    body: formData,
+  });
+
+  let lastResult: VideoResultPayload | null = null;
+  const maxAttempts = 6;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await delay(800);
+    const result = await apiRequest<VideoResultPayload>(`/api/v1/results/${accepted.job_id}`);
+    lastResult = result;
+    if (result.status === "completed") break;
+  }
+
+  const mapped = lastResult;
+  const dsq = Math.round(mapped?.dsq_score ?? 0);
+  const severity = mapSeverityFromScore(dsq);
+  const primaryType: ResultResponse["findings"][number]["type"] =
+    severity === "high" ? "dent" : severity === "medium" ? "scratch" : "paint damage";
+
+  return {
+    inspectionId: mapped?.job_id ?? accepted.job_id,
+    vehicle: {
+      plate: payload.plate,
+      model: payload.model,
+      vin: payload.vin,
+      type: payload.vehicleType,
+      inspectedAt: new Date().toISOString(),
+    },
+    healthScore: Math.max(0, 100 - dsq),
+    triageCategory: dsq >= 34 ? "STRUCTURAL/FUNCTIONAL" : "COSMETIC",
+    processedImageUrl: "/favicon.ico",
+    findings: [
+      {
+        id: "DMG-VIDEO-1",
+        type: primaryType,
+        severity,
+        confidence: Math.max(0.2, Math.min(1, mapped?.confidence_overall ?? 0.45)),
+        category: dsq >= 34 ? "Functional" : "Cosmetic",
+        estimateMin: mapped?.repair_cost_min_inr ?? 2000,
+        estimateMax: mapped?.repair_cost_max_inr ?? 7000,
+        explainability: "Video-based inspection generated this summary from extracted sharp frames.",
+        box: [20, 20, 240, 180],
+      },
+    ],
   };
 }
 
@@ -425,6 +484,49 @@ export async function getAnalytics(): Promise<{
     riskRanking: rankingData.ranking,
     distribution: distributionData.items,
   };
+}
+
+export async function getNearbyGarages(params: {
+  lat: number;
+  lng: number;
+  sort?: "smart_score" | "distance" | "rating" | "cheapest";
+  damageType?: string;
+}): Promise<NearbyGarage[]> {
+  if (!USE_BACKEND) {
+    await delay(350);
+    return [
+      {
+        id: "g1",
+        name: "AutoFix Prime",
+        address: "Andheri East, Mumbai",
+        city: "Mumbai",
+        distance_km: 2.1,
+        rating: 4.5,
+        is_open_now: true,
+        smart_score: 82,
+        services: ["Dent repair", "Paint work"],
+        pricing: {
+          scratch: { min: 1500, max: 3200 },
+          dent: { min: 3400, max: 7800 },
+          paint: { min: 4200, max: 8500 },
+          major: { min: 15000, max: 31000 },
+        },
+        market_comparison: {
+          scratch: { market_avg: 3500, delta_pct: -18, verdict: "below_market" },
+        },
+        price_badge: "BELOW MARKET",
+      },
+    ];
+  }
+
+  const query = new URLSearchParams({
+    lat: String(params.lat),
+    lng: String(params.lng),
+    sort: params.sort ?? "smart_score",
+    damage_type: params.damageType ?? "dent",
+  });
+  const data = await apiRequest<{ items: NearbyGarage[] }>(`/api/v1/garages/nearby?${query.toString()}`);
+  return data.items;
 }
 
 export async function getNotificationPreferences(): Promise<NotificationPreferences> {

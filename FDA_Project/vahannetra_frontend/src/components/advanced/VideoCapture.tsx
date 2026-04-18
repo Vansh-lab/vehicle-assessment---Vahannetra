@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -8,63 +8,184 @@ interface VideoCaptureProps {
   onCapture: (file: File) => void;
 }
 
+type PermissionState = "idle" | "requesting" | "granted" | "denied";
+
 export function VideoCapture({ onCapture }: VideoCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
-  const [recording, setRecording] = useState(false);
-  const [ready, setReady] = useState(false);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  useEffect(() => {
-    let stream: MediaStream | null = null;
-    const setup = async () => {
-      if (!navigator?.mediaDevices?.getUserMedia) return;
-      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      if (videoRef.current) videoRef.current.srcObject = stream;
-      setReady(true);
-    };
-    setup().catch(() => setReady(false));
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
-    };
+  const [permission, setPermission] = useState<PermissionState>("idle");
+  const [recording, setRecording] = useState(false);
+  const [stopped, setStopped] = useState(false);
+  const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
+  const [duration, setDuration] = useState(0);
+  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const MAX_DURATION = 30;
+
+  const clearPreview = useCallback(() => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+  }, [previewUrl]);
+
+  const stopStream = useCallback(() => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
   }, []);
 
-  const startRecording = () => {
-    const stream = videoRef.current?.srcObject;
-    if (!(stream instanceof MediaStream)) return;
+  const requestCameraForMode = useCallback(async (mode: "environment" | "user") => {
+    setPermission("requesting");
+    stopStream();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: mode, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      setPermission("granted");
+    } catch {
+      setPermission("denied");
+    }
+  }, [stopStream]);
+
+  const startCamera = useCallback(async () => {
+    await requestCameraForMode(facingMode);
+  }, [facingMode, requestCameraForMode]);
+
+  const switchCamera = useCallback(async () => {
+    const nextMode = facingMode === "environment" ? "user" : "environment";
+    setFacingMode(nextMode);
+    await requestCameraForMode(nextMode);
+  }, [facingMode, requestCameraForMode]);
+
+  const stopRecording = useCallback(() => {
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
+  }, []);
+
+  const startRecording = useCallback(() => {
+    if (!(streamRef.current instanceof MediaStream)) return;
     chunksRef.current = [];
-    const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-    recorderRef.current = recorder;
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm";
+    const recorder = new MediaRecorder(streamRef.current, { mimeType });
+    mediaRecorderRef.current = recorder;
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) chunksRef.current.push(event.data);
     };
     recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: "video/webm" });
-      onCapture(new File([blob], `capture-${Date.now()}.webm`, { type: "video/webm" }));
+      const blob = new Blob(chunksRef.current, { type: mimeType });
+      setVideoBlob(blob);
+      clearPreview();
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+      setStopped(true);
     };
-    recorder.start(250);
+    recorder.start(100);
+    setDuration(0);
+    setStopped(false);
     setRecording(true);
-  };
+  }, [clearPreview]);
 
-  const stopRecording = () => {
-    recorderRef.current?.stop();
-    setRecording(false);
-  };
+  useEffect(() => {
+    if (!recording) return undefined;
+    const interval = setInterval(() => {
+      setDuration((prev) => {
+        if (prev >= MAX_DURATION - 1) {
+          stopRecording();
+          return MAX_DURATION;
+        }
+        return prev + 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [recording, stopRecording]);
+
+  const useRecordedVideo = useCallback(() => {
+    if (!videoBlob) return;
+    const file = new File([videoBlob], `capture-${Date.now()}.webm`, { type: videoBlob.type || "video/webm" });
+    onCapture(file);
+  }, [onCapture, videoBlob]);
+
+  const reRecord = useCallback(() => {
+    setVideoBlob(null);
+    setStopped(false);
+    setDuration(0);
+    clearPreview();
+  }, [clearPreview]);
+
+  useEffect(
+    () => () => {
+      stopStream();
+      clearPreview();
+    },
+    [clearPreview, stopStream],
+  );
+
+  const countdown = useMemo(() => MAX_DURATION - duration, [duration]);
 
   return (
     <Card className="space-y-3">
-      <p className="text-sm font-semibold text-slate-100">Video Capture</p>
-      <video ref={videoRef} autoPlay muted playsInline className="w-full rounded-xl border border-white/15" />
-      <div className="flex gap-2">
-        <Button type="button" onClick={startRecording} disabled={!ready || recording}>
-          Start
+      <p className="text-sm font-semibold text-slate-100">Video Capture (max 30s)</p>
+
+      {permission === "idle" || permission === "requesting" ? (
+        <Button type="button" onClick={() => void startCamera()} disabled={permission === "requesting"}>
+          {permission === "requesting" ? "Requesting camera..." : "Enable camera"}
         </Button>
-        <Button type="button" variant="secondary" onClick={stopRecording} disabled={!recording}>
-          Stop
-        </Button>
-      </div>
+      ) : null}
+
+      {permission === "denied" ? (
+        <div className="space-y-2 text-xs text-amber-200">
+          <p>Camera access denied. You can still upload a video manually.</p>
+          <input
+            type="file"
+            accept="video/mp4,video/webm,video/quicktime"
+            onChange={(event) => {
+              const picked = event.target.files?.[0];
+              if (picked) onCapture(picked);
+            }}
+          />
+        </div>
+      ) : null}
+
+      {permission === "granted" && !stopped ? (
+        <>
+          <video ref={videoRef} autoPlay muted playsInline className="w-full rounded-xl border border-white/15" />
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" onClick={startRecording} disabled={recording}>
+              Start recording
+            </Button>
+            <Button type="button" variant="secondary" onClick={stopRecording} disabled={!recording}>
+              Stop
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void switchCamera()}
+              disabled={recording}
+            >
+              Switch camera
+            </Button>
+          </div>
+          {recording ? <p className="text-xs text-cyan-200">Recording... {duration}s / {MAX_DURATION}s (remaining {countdown}s)</p> : null}
+        </>
+      ) : null}
+
+      {stopped && previewUrl ? (
+        <div className="space-y-2">
+          <video src={previewUrl} controls className="w-full rounded-xl border border-white/15" />
+          <div className="flex gap-2">
+            <Button type="button" onClick={useRecordedVideo}>
+              Use this video
+            </Button>
+            <Button type="button" variant="secondary" onClick={reRecord}>
+              Record again
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </Card>
   );
 }

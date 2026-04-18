@@ -1,47 +1,103 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import type { NearbyGarage } from "@/lib/api/types";
 import { Card } from "@/components/ui/card";
 
-interface NearbyService {
-  id: string;
-  name: string;
-  distanceKm: number;
-  dent: string;
-  scratch: string;
-  paint: string;
-  rating: number;
-}
-
 interface NearbyServicesProps {
-  items: NearbyService[];
+  items: NearbyGarage[];
+  damageType?: string;
 }
 
-export function NearbyServices({ items }: NearbyServicesProps) {
+function sortByCheapest(garages: NearbyGarage[], damageType?: string) {
+  const normalized = (damageType || "").toLowerCase();
+  const key = normalized.includes("dent")
+    ? "dent"
+    : normalized.includes("paint")
+      ? "paint"
+      : normalized.includes("scratch")
+        ? "scratch"
+        : "major";
+  return [...garages].sort((a, b) => (a.pricing?.[key]?.min || 99999) - (b.pricing?.[key]?.min || 99999));
+}
+
+function PricingTable({
+  pricing,
+  marketComparison,
+  damageType,
+}: {
+  pricing: NearbyGarage["pricing"];
+  marketComparison?: NearbyGarage["market_comparison"];
+  damageType?: string;
+}) {
+  const normalized = (damageType || "").toLowerCase();
+  const rows = [
+    { key: "scratch", label: "Scratch repair" },
+    { key: "dent", label: "Dent repair" },
+    { key: "paint", label: "Paint work" },
+    { key: "major", label: "Major body work" },
+  ] as const;
+
   return (
-    <Card className="space-y-3 overflow-auto">
-      <p className="text-sm font-semibold text-slate-100">Nearby Services Pricing Matrix</p>
-      <table className="w-full min-w-[640px] text-xs text-slate-300">
-        <thead>
-          <tr className="text-left text-slate-400">
-            <th className="py-2 pr-3">Garage</th>
-            <th className="py-2 pr-3">Distance</th>
-            <th className="py-2 pr-3">Dent</th>
-            <th className="py-2 pr-3">Scratch</th>
-            <th className="py-2 pr-3">Paint</th>
-            <th className="py-2 pr-3">Rating</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id} className="border-t border-white/10">
-              <td className="py-2 pr-3 font-medium text-slate-200">{item.name}</td>
-              <td className="py-2 pr-3">{item.distanceKm.toFixed(1)} km</td>
-              <td className="py-2 pr-3">{item.dent}</td>
-              <td className="py-2 pr-3">{item.scratch}</td>
-              <td className="py-2 pr-3">{item.paint}</td>
-              <td className="py-2 pr-3">{item.rating.toFixed(1)}</td>
+    <table className="w-full text-xs text-slate-300">
+      <thead>
+        <tr className="text-left text-slate-400">
+          <th className="py-1 pr-2">Type</th>
+          <th className="py-1 pr-2">Range</th>
+          <th className="py-1 pr-2">Market delta</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => {
+          const selected = normalized.includes(row.key);
+          const market = marketComparison?.[row.key];
+          return (
+            <tr key={row.key} className={selected ? "bg-cyan-400/10" : "border-t border-white/10"}>
+              <td className="py-1 pr-2">{row.label}</td>
+              <td className="py-1 pr-2">₹{pricing[row.key].min.toLocaleString()} - ₹{pricing[row.key].max.toLocaleString()}</td>
+              <td className="py-1 pr-2">{market ? `${market.delta_pct}% (${market.verdict})` : "-"}</td>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+export function NearbyServices({ items, damageType }: NearbyServicesProps) {
+  const [sortMode, setSortMode] = useState<"smart" | "cheapest">("smart");
+  const sorted = useMemo(
+    () => (sortMode === "cheapest" ? sortByCheapest(items, damageType) : [...items].sort((a, b) => b.smart_score - a.smart_score)),
+    [damageType, items, sortMode],
+  );
+
+  return (
+    <Card className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-slate-100">Nearby Services Pricing Matrix</p>
+        <select
+          className="rounded border border-white/20 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+          value={sortMode}
+          onChange={(event) => setSortMode(event.target.value === "cheapest" ? "cheapest" : "smart")}
+        >
+          <option value="smart">Smart score</option>
+          <option value="cheapest">Cheapest ({damageType || "major"})</option>
+        </select>
+      </div>
+
+      <div className="space-y-3">
+        {sorted.map((item) => (
+          <div key={item.id} className="rounded-xl border border-white/10 p-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium text-slate-100">
+                {item.name} • {item.distance_km.toFixed(1)} km • ⭐ {item.rating.toFixed(1)}
+              </p>
+              {item.price_badge ? <span className="rounded-full bg-cyan-500/20 px-2 py-0.5 text-[10px] text-cyan-100">{item.price_badge}</span> : null}
+            </div>
+            <PricingTable pricing={item.pricing} marketComparison={item.market_comparison} damageType={damageType} />
+          </div>
+        ))}
+      </div>
     </Card>
   );
 }

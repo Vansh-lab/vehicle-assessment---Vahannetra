@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { useInspectionStore } from "@/store/inspection-store";
-import { assessDamageMock, assessDamageWithBackend } from "@/lib/api/services";
+import { analyzeVideoWithBackend, assessDamageMock, assessDamageWithBackend } from "@/lib/api/services";
 
 const stages = ["Preprocessing image", "Detection", "Classification", "Severity scoring"];
 
@@ -37,7 +37,11 @@ export default function ProcessingPage() {
 
     const run = async () => {
       try {
-        const response = process.env.NEXT_PUBLIC_USE_BACKEND === "true" ? await assessDamageWithBackend(selectedFile, payload) : await assessDamageMock(payload);
+        const response = process.env.NEXT_PUBLIC_USE_BACKEND === "true"
+          ? selectedFile.type.startsWith("video/")
+            ? await analyzeVideoWithBackend(selectedFile, payload)
+            : await assessDamageWithBackend(selectedFile, payload)
+          : await assessDamageMock(payload);
         if (cancelled) return;
         setResult(response);
         setProgress(100);

@@ -117,6 +117,7 @@ def test_v1_garages_webhooks_and_video_job():
     assert garages.status_code == 200
     assert isinstance(garages.json()["items"], list)
     assert len(garages.json()["items"]) >= 1
+    assert "market_comparison" in garages.json()["items"][0]
     garage_id = garages.json()["items"][0]["id"]
 
     pricing = client.get(f"/api/v1/garages/{garage_id}/pricing", headers=headers)
@@ -152,6 +153,7 @@ def test_v1_garages_webhooks_and_video_job():
         files={"file": ("sample.webm", b"FAKE_VIDEO_BYTES", "video/webm")},
     )
     assert video.status_code == 202
+    assert video.json()["estimated_seconds"] is not None
     job_id = video.json()["job_id"]
 
     result = client.get(f"/api/v1/results/{job_id}", headers=headers)

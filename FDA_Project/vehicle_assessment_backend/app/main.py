@@ -57,10 +57,15 @@ from app.middleware.request_context import request_context_middleware
 from app.routers.system import router as system_router
 from app.secrets import get_secret
 from app.services.detector import DamageDetector
+from app.services.storage import ArtifactStorageService
+from app.services.video_processing import extract_best_frames
+from app.services.webhook_dispatcher import build_retry_schedule, build_signature
+from app.tasks.webhooks import deliver_webhook
 from app.utils.assessment import calculate_dsi
 
 detector = DamageDetector()
 otp_provider = get_otp_provider()
+storage_service = ArtifactStorageService()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -217,6 +222,7 @@ class V1AnalyzeAccepted(BaseModel):
     job_id: str
     status: str
     message: str
+    estimated_seconds: int | None = None
 
 
 class V1VehicleCreateRequest(BaseModel):
@@ -337,6 +343,43 @@ def smart_score(distance_km: float, rating: float, is_open: bool, services_count
     )
 
 
+MARKET_AVG_PRICING = {
+    "scratch": 3500,
+    "dent": 8000,
+    "paint": 6000,
+    "major": 25000,
+}
+
+
+def market_verdict(delta_pct: int) -> str:
+    if delta_pct <= -10:
+        return "below_market"
+    if delta_pct >= 10:
+        return "above_market"
+    return "market_rate"
+
+
+def pricing_market_comparison(min_price: int, market_avg: int) -> dict:
+    if market_avg <= 0:
+        return {"market_avg": market_avg, "delta_pct": 0, "verdict": "market_rate"}
+    delta_pct = int(round(((min_price - market_avg) / market_avg) * 100))
+    return {
+        "market_avg": market_avg,
+        "delta_pct": delta_pct,
+        "verdict": market_verdict(delta_pct),
+    }
+
+
+def price_badge(comparisons: dict[str, dict]) -> str:
+    deltas = [item.get("delta_pct", 0) for item in comparisons.values()]
+    avg_delta = sum(deltas) / len(deltas) if deltas else 0
+    if avg_delta <= -10:
+        return "BELOW MARKET"
+    if avg_delta >= 10:
+        return "ABOVE MARKET"
+    return "MARKET RATE"
+
+
 def make_demo_vehicle(plate_or_vin: str) -> dict:
     catalog = [
         ("Maruti", "Baleno", "Petrol", False),
@@ -428,6 +471,17 @@ def validate_upload(file: UploadFile, payload: bytes) -> None:
     decoded = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
     if decoded is None:
         raise HTTPException(status_code=400, detail="Corrupt or unsupported image payload")
+
+
+def validate_video_upload(file: UploadFile, payload: bytes) -> None:
+    allowed_types = {"video/mp4", "video/webm", "video/quicktime", "video/mov"}
+    max_size_bytes = int(os.getenv("MAX_VIDEO_UPLOAD_SIZE_BYTES", str(100 * 1024 * 1024)))
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded video is empty")
+    if len(payload) > max_size_bytes:
+        raise HTTPException(status_code=413, detail="Video exceeds max size of 100MB")
+    if not file.content_type or file.content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail="Only mp4, webm and mov video files are allowed")
 
 
 def issue_token_bundle(db: Session, user: User, organization: Organization) -> AuthResponse:
@@ -1210,6 +1264,14 @@ async def health(db: Session = Depends(get_db)):
     redis_status = "not_configured"
     if redis_url:
         redis_status = "unavailable"
+        try:
+            parsed = urllib.parse.urlparse(redis_url)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 6379
+            with socket.create_connection((host, port), timeout=0.5):
+                redis_status = "up"
+        except OSError:
+            redis_status = "down"
     return {"status": "ok" if db_ok else "degraded", "database": "up" if db_ok else "down", "redis": redis_status}
 
 
@@ -1275,26 +1337,66 @@ async def v1_analyze_video(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not file.content_type or not file.content_type.startswith("video/"):
-        raise HTTPException(status_code=415, detail="Only video upload is supported")
     payload = await file.read()
-    if not payload:
-        raise HTTPException(status_code=400, detail="Uploaded video is empty")
-    safe_name = f"video_{uuid.uuid4().hex}{extension_for_content_type(file.content_type, fallback='.webm')}"
+    validate_video_upload(file, payload)
+
+    job_id = f"JOB-{uuid.uuid4().hex[:12].upper()}"
+    safe_name = f"{job_id}_input{extension_for_content_type(file.content_type, fallback='.webm')}"
     file_path = UPLOAD_DIR / safe_name
     with open(file_path, "wb") as output_file:
         output_file.write(payload)
 
+    frames_dir = UPLOAD_DIR / f"{job_id}_frames"
+    extraction = extract_best_frames(file_path, frames_dir, n_frames=6, sharpness_threshold=100.0)
+    estimated_seconds = max(3, min(120, extraction.duration_seconds + 4))
+
+    frame_keys: list[str] = []
+    detections: list[dict] = []
+    annotated_output = ""
+    for index, frame in enumerate(extraction.extracted_frames, start=1):
+        frame_key = f"jobs/{job_id}/frame_{index}.jpg"
+        frame_keys.append(frame_key)
+        try:
+            with open(frame.frame_path, "rb") as frame_file:
+                await storage_service.upload_bytes(frame_key, frame_file.read(), "image/jpeg")
+        except OSError:
+            pass
+
+        frame_detections, frame_annotated_path = detector.analyze_vehicle(str(frame.frame_path))
+        detections.extend(frame_detections)
+        if not annotated_output and frame_annotated_path:
+            annotated_output = frame_annotated_path
+
+    video_key = f"jobs/{job_id}/input_video{extension_for_content_type(file.content_type, fallback='.webm')}"
+    await storage_service.upload_bytes(video_key, payload, file.content_type or "video/webm")
+
+    if annotated_output:
+        try:
+            with open(annotated_output, "rb") as annotated_file:
+                await storage_service.upload_bytes(
+                    f"jobs/{job_id}/annotated.jpg",
+                    annotated_file.read(),
+                    "image/jpeg",
+                )
+        except OSError:
+            pass
+
     job = create_job_from_findings(
         db,
         current_user.organization_id,
-        [],
+        detections,
         input_type="video",
-        annotated_key="",
-        video_key=f"uploads/{safe_name}",
-        status="processing",
+        annotated_key=f"jobs/{job_id}/annotated.jpg" if annotated_output else "",
+        image_keys=frame_keys,
+        video_key=video_key,
+        status="completed",
     )
-    return V1AnalyzeAccepted(job_id=job.id, status="queued", message="Video analysis accepted")
+    return V1AnalyzeAccepted(
+        job_id=job.id,
+        status="queued",
+        message="Video analysis accepted",
+        estimated_seconds=estimated_seconds,
+    )
 
 
 @app.get("/api/v1/results/{job_id}")
@@ -1439,6 +1541,7 @@ async def v1_garages_nearby(
     lat: float = Query(...),
     lng: float = Query(...),
     sort: str = Query(default="smart_score"),
+    damage_type: str = Query(default="dent"),
     ev_only: bool = Query(default=False),
     insurance_only: bool = Query(default=False),
     open_now: bool = Query(default=False),
@@ -1461,25 +1564,38 @@ async def v1_garages_nearby(
             continue
         services = json.loads(garage.services or "[]")
         score = smart_score(distance_km, garage.rating, garage.is_open_now, len(services))
+        pricing = {
+            "scratch": {"min": garage.pricing_scratch_min, "max": garage.pricing_scratch_max},
+            "dent": {"min": garage.pricing_dent_min, "max": garage.pricing_dent_max},
+            "paint": {"min": garage.pricing_paint_min, "max": garage.pricing_paint_max},
+            "major": {"min": garage.pricing_major_min, "max": garage.pricing_major_max},
+        }
+        market_comparison = {
+            key: pricing_market_comparison(pricing[key]["min"], MARKET_AVG_PRICING[key])
+            for key in ("scratch", "dent", "paint", "major")
+        }
         enriched.append(
             {
                 "id": garage.id,
                 "name": garage.name,
                 "address": garage.address,
+                "city": garage.city,
+                "phone": garage.phone,
+                "latitude": garage.latitude,
+                "longitude": garage.longitude,
                 "distance_km": round(distance_km, 2),
                 "rating": garage.rating,
                 "is_open_now": garage.is_open_now,
                 "services": services,
                 "smart_score": score,
-                "pricing": {
-                    "scratch": [garage.pricing_scratch_min, garage.pricing_scratch_max],
-                    "dent": [garage.pricing_dent_min, garage.pricing_dent_max],
-                    "paint": [garage.pricing_paint_min, garage.pricing_paint_max],
-                    "major": [garage.pricing_major_min, garage.pricing_major_max],
-                },
+                "pricing": pricing,
+                "market_comparison": market_comparison,
+                "price_badge": price_badge(market_comparison),
                 "hourly_labour_rate": garage.hourly_labour_rate,
                 "workshop_type": garage.workshop_type,
                 "certifications": json.loads(garage.certifications or "[]"),
+                "years_in_business": garage.years_in_business,
+                "google_maps_url": garage.google_maps_url,
             }
         )
 
@@ -1488,7 +1604,15 @@ async def v1_garages_nearby(
     elif sort == "rating":
         enriched.sort(key=lambda item: item["rating"], reverse=True)
     elif sort == "cheapest":
-        enriched.sort(key=lambda item: item["pricing"]["dent"][0] + item["pricing"]["scratch"][0])
+        key = "major"
+        damage = damage_type.lower()
+        if "dent" in damage:
+            key = "dent"
+        elif "paint" in damage:
+            key = "paint"
+        elif "scratch" in damage:
+            key = "scratch"
+        enriched.sort(key=lambda item: item["pricing"][key]["min"])
     else:
         enriched.sort(key=lambda item: item["smart_score"], reverse=True)
     return {"items": enriched}
@@ -1535,10 +1659,10 @@ async def v1_garage_pricing(garage_id: str, db: Session = Depends(get_db), curre
         "garage_id": garage.id,
         "name": garage.name,
         "pricing": {
-            "minor_scratch": [garage.pricing_scratch_min, garage.pricing_scratch_max],
-            "dent_repair": [garage.pricing_dent_min, garage.pricing_dent_max],
-            "paint_work": [garage.pricing_paint_min, garage.pricing_paint_max],
-            "major_repair": [garage.pricing_major_min, garage.pricing_major_max],
+            "scratch": {"min": garage.pricing_scratch_min, "max": garage.pricing_scratch_max},
+            "dent": {"min": garage.pricing_dent_min, "max": garage.pricing_dent_max},
+            "paint": {"min": garage.pricing_paint_min, "max": garage.pricing_paint_max},
+            "major": {"min": garage.pricing_major_min, "max": garage.pricing_major_max},
         },
         "hourly_labour_rate": garage.hourly_labour_rate,
     }
@@ -1656,9 +1780,19 @@ async def v1_test_webhook(webhook_id: str, db: Session = Depends(get_db), curren
         "status": "test",
         "organization_id": current_user.organization_id,
     }
-    signature = hmac.new(
-        webhook.secret.encode("utf-8"),
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-    return {"webhook_id": webhook.id, "signature": signature, "payload": payload, "delivered": True}
+    signature = build_signature(webhook.secret, payload)
+    schedule = build_retry_schedule(max_attempts=5)
+    task_id = None
+    try:
+        task = deliver_webhook.delay(webhook.target_url, payload, signature)
+        task_id = task.id
+    except Exception:
+        task_id = None
+    return {
+        "webhook_id": webhook.id,
+        "signature": signature,
+        "payload": payload,
+        "delivered": True,
+        "task_id": task_id,
+        "retry_schedule": [isoformat_utc_z(item.scheduled_at) for item in schedule],
+    }
