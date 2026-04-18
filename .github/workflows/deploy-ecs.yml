@@ -16,14 +16,14 @@ env:
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'vahannetra-prod' }}
   ECS_BACKEND_SERVICE: ${{ vars.ECS_BACKEND_SERVICE || 'vahannetra-backend-svc' }}
   ECS_FRONTEND_SERVICE: ${{ vars.ECS_FRONTEND_SERVICE || 'vahannetra-frontend-svc' }}
-  BENCHMARK_URL_1: ${{ vars.BENCHMARK_URL_1 || 'https://example.invalid/health' }}
-  BENCHMARK_URL_2: ${{ vars.BENCHMARK_URL_2 || 'https://example.invalid/api/v1/system/capabilities' }}
-  BENCHMARK_URL_3: ${{ vars.BENCHMARK_URL_3 || 'https://example.invalid/api/v1/dashboard/stats' }}
-  BENCHMARK_URL_4: ${{ vars.BENCHMARK_URL_4 || 'https://example.invalid/api/v1/dashboard/timeline?days=7' }}
-  BENCHMARK_URL_5: ${{ vars.BENCHMARK_URL_5 || 'https://example.invalid/api/v1/garages/nearby?lat=19.07&lng=72.87' }}
-  BENCHMARK_URL_6: ${{ vars.BENCHMARK_URL_6 || 'https://example.invalid/api/v1/system/queue/observability' }}
-  BENCHMARK_URL_7: ${{ vars.BENCHMARK_URL_7 || 'https://example.invalid/dashboard/overview' }}
-  BENCHMARK_URL_8: ${{ vars.BENCHMARK_URL_8 || 'https://example.invalid/' }}
+  BENCHMARK_URL_1: ${{ vars.BENCHMARK_URL_1 || '' }}
+  BENCHMARK_URL_2: ${{ vars.BENCHMARK_URL_2 || '' }}
+  BENCHMARK_URL_3: ${{ vars.BENCHMARK_URL_3 || '' }}
+  BENCHMARK_URL_4: ${{ vars.BENCHMARK_URL_4 || '' }}
+  BENCHMARK_URL_5: ${{ vars.BENCHMARK_URL_5 || '' }}
+  BENCHMARK_URL_6: ${{ vars.BENCHMARK_URL_6 || '' }}
+  BENCHMARK_URL_7: ${{ vars.BENCHMARK_URL_7 || '' }}
+  BENCHMARK_URL_8: ${{ vars.BENCHMARK_URL_8 || '' }}
   BENCHMARK_ACCEPTABLE_CODES: ${{ vars.BENCHMARK_ACCEPTABLE_CODES || '200,201,202,204,301,302,401,403' }}
 
 jobs:
@@ -121,7 +121,12 @@ jobs:
             return 1
           }
 
+          configured_targets=0
           for target in "$BENCHMARK_URL_1" "$BENCHMARK_URL_2" "$BENCHMARK_URL_3" "$BENCHMARK_URL_4" "$BENCHMARK_URL_5" "$BENCHMARK_URL_6" "$BENCHMARK_URL_7" "$BENCHMARK_URL_8"; do
+            if [[ -z "$target" ]]; then
+              continue
+            fi
+            configured_targets=$((configured_targets + 1))
             metrics=$(curl -sS -o /dev/null -w "%{http_code},%{time_total},%{time_connect},%{time_starttransfer}" "$target" || echo "000,0,0,0")
             echo "$target,$metrics" >> perf/timed-benchmark.csv
             code=$(echo "$metrics" | cut -d',' -f1)
@@ -130,6 +135,10 @@ jobs:
               exit 1
             fi
           done
+          if [[ "$configured_targets" -eq 0 ]]; then
+            echo "No benchmark URLs configured. Set BENCHMARK_URL_1..8 repo variables."
+            exit 1
+          fi
 
       - name: Upload perf evidence artifact
         uses: actions/upload-artifact@v4
