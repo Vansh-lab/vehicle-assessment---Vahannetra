@@ -1,4 +1,4 @@
-.PHONY: dev test seed migrate build clean shell logs smoke aws-preflight
+.PHONY: dev test seed migrate build clean shell logs smoke aws-preflight phase1-bootstrap phase1-verify
 
 dev:
 docker compose -f docker-compose.dev.yml up --build
@@ -28,4 +28,10 @@ smoke:
 bash scripts/test_api.sh http://localhost:8000
 
 aws-preflight:
-bash scripts/aws_deploy_preflight.sh
+	bash scripts/aws_deploy_preflight.sh
+
+phase1-bootstrap:
+	cd .. && PYTHONPATH=. python -m vahannetra.scripts.bootstrap_target_tree
+
+phase1-verify:
+	cd .. && PYTHONPATH=. python -m vahannetra.scripts.verify_scope_lock
