@@ -1,0 +1,27 @@
+# Python environments and cache
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+
+# Project specific directories (do not upload user images)
+uploads/
+
+# Model files
+# Note: GitHub has a 100MB file size limit. If your best.pt is smaller and you want to upload it, remove this line.
+*.pt
+
+# IDEs and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Node artifacts
+node_modules/
+
+# Accidental root-level frontend scaffolds
+/frontend/
+/package-lock.json
