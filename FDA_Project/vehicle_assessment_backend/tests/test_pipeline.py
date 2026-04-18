@@ -23,7 +23,11 @@ def _severity_bucket(score: float) -> str:
 
 
 def _category_for_damage(damage_type: str) -> str:
-    return "functional" if damage_type in {"windshield", "crack", "broken part", "battery_casing"} else "cosmetic"
+    return (
+        "functional"
+        if damage_type in {"windshield", "crack", "broken part", "battery_casing"}
+        else "cosmetic"
+    )
 
 
 def _quadrant(box: list[int], width: int = 1280, height: int = 960) -> str:
@@ -37,7 +41,10 @@ def _part_summary(parts: list[str]) -> str:
 
 
 def _adjacent_parts() -> dict[str, list[str]]:
-    return {"front_bumper": ["left_fender", "right_fender"], "door_panel": ["rear_door", "front_fender"]}
+    return {
+        "front_bumper": ["left_fender", "right_fender"],
+        "door_panel": ["rear_door", "front_fender"],
+    }
 
 
 def _ev_risk(parts: list[str]) -> str:
@@ -122,7 +129,16 @@ def test_iou_symmetric():
 
 
 def test_fraud_genuine_damage_low_score():
-    r = compute_dsq_v2([{"class": "scratch", "severity": "low", "confidence": 0.6, "box": [0, 0, 30, 30]}])
+    r = compute_dsq_v2(
+        [
+            {
+                "class": "scratch",
+                "severity": "low",
+                "confidence": 0.6,
+                "box": [0, 0, 30, 30],
+            }
+        ]
+    )
     assert r.fraud_risk_score < 40
 
 
@@ -131,7 +147,19 @@ def test_fraud_no_damage_zero():
 
 
 def test_fraud_uniform_severity_suspicious():
-    scores = [compute_dsq_v2([{"class": "dent", "severity": "high", "confidence": 0.9, "box": [0, 0, 500, 500]}]).score for _ in range(3)]
+    scores = [
+        compute_dsq_v2(
+            [
+                {
+                    "class": "dent",
+                    "severity": "high",
+                    "confidence": 0.9,
+                    "box": [0, 0, 500, 500],
+                }
+            ]
+        ).score
+        for _ in range(3)
+    ]
     assert max(scores) - min(scores) == 0
 
 
