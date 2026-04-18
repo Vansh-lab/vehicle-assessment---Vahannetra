@@ -127,17 +127,23 @@ def _box_iou(a: list[float], b: list[float]) -> float:
     return inter_area / union if union > 0 else 0.0
 
 
-def _fuse_detections_with_nms(detections: list[dict], iou_threshold: float = 0.45) -> list[dict]:
+def _fuse_detections_with_nms(
+    detections: list[dict], iou_threshold: float = 0.45
+) -> list[dict]:
     if not detections:
         return []
-    sorted_dets = sorted(detections, key=lambda d: float(d.get("confidence", 0.0)), reverse=True)
+    sorted_dets = sorted(
+        detections, key=lambda d: float(d.get("confidence", 0.0)), reverse=True
+    )
     kept: list[dict] = []
     for det in sorted_dets:
         det_class = str(det.get("class") or det.get("type") or "").strip().lower()
         det_box = det.get("box") or []
         should_keep = True
         for existing in kept:
-            existing_class = str(existing.get("class") or existing.get("type") or "").strip().lower()
+            existing_class = (
+                str(existing.get("class") or existing.get("type") or "").strip().lower()
+            )
             if existing_class != det_class:
                 continue
             iou = _box_iou(existing.get("box") or [], det_box)
@@ -318,7 +324,8 @@ async def v1_analyze_video(
 
     fused = _fuse_detections_with_nms(detections)
 
-    # Fixed key contract from spec
+    # Fixed key contract from product spec: backend stores canonical object key
+    # as input_video.mp4 for downstream consumers, independent of upload mime.
     video_key = f"jobs/{job_id}/input_video.mp4"
     await storage_service.upload_bytes(
         video_key, payload, file.content_type or "video/webm"

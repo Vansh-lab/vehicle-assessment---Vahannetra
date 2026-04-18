@@ -44,9 +44,6 @@ export default function ResultPage() {
 
   const downloadMutation = useMutation({
     mutationFn: () => downloadInspectionReport(result.inspectionId),
-    onSuccess: (url) => {
-      window.open(url, "_blank", "noopener,noreferrer");
-    },
   });
 
   const confidence = useMemo(() => {
@@ -80,6 +77,29 @@ export default function ResultPage() {
     [groupedCount],
   );
   const topDamageType = result.findings[0]?.type ?? "major";
+  const scratchSummary = useMemo(() => {
+    const scratchFindings = result.findings.filter((finding) => finding.type === "scratch");
+    const total = scratchFindings.length;
+    if (total === 0) {
+      return {
+        total: 0,
+        avgConfidence: 0,
+        low: 0,
+        medium: 0,
+        high: 0,
+      };
+    }
+    const avgConfidence = Math.round(
+      (scratchFindings.reduce((sum, finding) => sum + finding.confidence, 0) / total) * 100,
+    );
+    return {
+      total,
+      avgConfidence,
+      low: scratchFindings.filter((finding) => finding.severity === "low").length,
+      medium: scratchFindings.filter((finding) => finding.severity === "medium").length,
+      high: scratchFindings.filter((finding) => finding.severity === "high").length,
+    };
+  }, [result.findings]);
 
   const garagesQuery = useQuery({
     queryKey: ["nearby-garages", topDamageType],
@@ -109,6 +129,17 @@ export default function ResultPage() {
               {key}: {value}
             </Badge>
           ))}
+        </div>
+      </Card>
+
+      <Card>
+        <p className="mb-2 text-sm font-semibold text-slate-100">Scratch summary</p>
+        <div className="grid gap-2 text-sm text-slate-200 md:grid-cols-2">
+          <p>Total scratches: <span className="font-semibold text-cyan-100">{scratchSummary.total}</span></p>
+          <p>Avg confidence: <span className="font-semibold text-cyan-100">{scratchSummary.avgConfidence}%</span></p>
+          <p>Low severity scratches: <span className="font-semibold text-cyan-100">{scratchSummary.low}</span></p>
+          <p>Medium severity scratches: <span className="font-semibold text-cyan-100">{scratchSummary.medium}</span></p>
+          <p>High severity scratches: <span className="font-semibold text-cyan-100">{scratchSummary.high}</span></p>
         </div>
       </Card>
 
