@@ -20,7 +20,6 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Uploa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth import (
@@ -48,19 +47,20 @@ from app.db_models import (
     Setting,
     User,
     Vehicle,
-    WebhookSubscription,
 )
 from app.otp_provider import get_otp_provider
 from app.pdf_reports import render_inspection_report
 from app.core.settings import settings
 from app.middleware.request_context import request_context_middleware
+from app.routers.dashboard import router as dashboard_router
+from app.routers.health import router as health_router
 from app.routers.system import router as system_router
+from app.routers.webhooks import router as webhooks_router
 from app.secrets import get_secret
 from app.services.detector import DamageDetector
+from app.services.dsq_v2 import compute_dsq_v2
 from app.services.storage import ArtifactStorageService
 from app.services.video_processing import extract_best_frames
-from app.services.webhook_dispatcher import build_retry_schedule, build_signature
-from app.tasks.webhooks import deliver_webhook
 from app.utils.assessment import calculate_dsi
 
 detector = DamageDetector()
@@ -237,12 +237,6 @@ class V1VehicleCreateRequest(BaseModel):
     rto: str = "Unknown"
 
 
-class V1WebhookRegisterRequest(BaseModel):
-    target_url: str
-    event_type: str = "inspection.completed"
-    secret: Optional[str] = None
-
-
 class AuthResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -294,16 +288,6 @@ def finding_from_detection(index: int, det: dict, severity: SeverityLevel, triag
         explainability=f"Detected {det.get('class', 'damage')} based on contour/texture anomalies.",
         box=[float(x) for x in det.get("box", [0, 0, 0, 0])],
     )
-
-
-def dsq_breakdown(score: float) -> dict[str, float]:
-    normalized = max(0.0, min(100.0, score)) / 100.0
-    return {
-        "area_ratio": round(normalized * 0.30, 4),
-        "part_criticality": round(normalized * 0.35, 4),
-        "functional_impact": round(normalized * 0.25, 4),
-        "confidence": round(normalized * 0.10, 4),
-    }
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -420,8 +404,9 @@ def create_job_from_findings(
     video_key: str = "",
     status: str = "completed",
 ) -> InspectionJob:
-    score = float(calculate_dsi(findings, (720, 1280, 3))) if findings else 0.0
-    severity = "high" if score >= 67 else "medium" if score >= 34 else "low"
+    dsq_result = compute_dsq_v2(findings, (720, 1280, 3))
+    score = dsq_result.score
+    severity = dsq_result.overall_severity
     hash_payload = f"{organization_id}:{score}:{utc_now().isoformat()}"
     hash_secret_key = (get_secret("VAHANNETRA_HASH_SECRET", "vahannetra-hash-secret") or "").encode("utf-8")
     hash_value = hmac.new(hash_secret_key, hash_payload.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -434,14 +419,14 @@ def create_job_from_findings(
         s3_video_key=video_key,
         s3_annotated_key=annotated_key,
         dsq_score=round(score, 2),
-        dsq_breakdown=json.dumps(dsq_breakdown(score)),
+        dsq_breakdown=json.dumps(dsq_result.breakdown),
         overall_severity=severity,
         confidence_overall=round(max([float(item.get("confidence", 0.0)) for item in findings], default=0.0), 4),
-        fraud_risk_score=round(min(100.0, score * 0.6), 2),
+        fraud_risk_score=dsq_result.fraud_risk_score,
         fraud_flags=json.dumps([]),
-        auto_approve=score < 45,
-        repair_cost_min_inr=2000 if score < 34 else 8000 if score < 67 else 20000,
-        repair_cost_max_inr=7000 if score < 34 else 22000 if score < 67 else 55000,
+        auto_approve=dsq_result.auto_approve,
+        repair_cost_min_inr=dsq_result.repair_cost_min_inr,
+        repair_cost_max_inr=dsq_result.repair_cost_max_inr,
         recommendation="Proceed with repair estimate and insurer review.",
         insurance_claim_steps="Upload RC, policy, and inspection images. Submit claim and await surveyor review.",
         blockchain_hash=hash_value,
@@ -794,6 +779,9 @@ async def root():
 
 
 app.include_router(system_router)
+app.include_router(health_router)
+app.include_router(dashboard_router)
+app.include_router(webhooks_router)
 
 
 @app.post("/auth/login", response_model=AuthResponse)
@@ -1255,29 +1243,6 @@ async def record_client_error(
     return {"ok": True}
 
 
-@app.get("/health")
-async def health(db: Session = Depends(get_db)):
-    db_ok = True
-    try:
-        db.execute(text("SELECT 1"))
-    except Exception:
-        db_ok = False
-
-    redis_url = os.getenv("REDIS_URL")
-    redis_status = "not_configured"
-    if redis_url:
-        redis_status = "unavailable"
-        try:
-            parsed = urllib.parse.urlparse(redis_url)
-            host = parsed.hostname or "localhost"
-            port = parsed.port or 6379
-            with socket.create_connection((host, port), timeout=0.5):
-                redis_status = "up"
-        except OSError:
-            redis_status = "down"
-    return {"status": "ok" if db_ok else "degraded", "database": "up" if db_ok else "down", "redis": redis_status}
-
-
 @app.post("/api/v1/analyze", status_code=202, response_model=V1AnalyzeAccepted)
 async def v1_analyze(
     files: list[UploadFile] = File(...),
@@ -1668,134 +1633,4 @@ async def v1_garage_pricing(garage_id: str, db: Session = Depends(get_db), curre
             "major": {"min": garage.pricing_major_min, "max": garage.pricing_major_max},
         },
         "hourly_labour_rate": garage.hourly_labour_rate,
-    }
-
-
-@app.get("/api/v1/dashboard/stats")
-async def v1_dashboard_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    inspections = db.query(Inspection).filter(Inspection.organization_id == current_user.organization_id).all()
-    jobs = db.query(InspectionJob).filter(InspectionJob.organization_id == current_user.organization_id).all()
-    total = len(inspections)
-    completed = len([item for item in inspections if item.status == "Completed"])
-    auto_approved = len([item for item in jobs if item.auto_approve])
-    avg_dsq = round(sum([item.dsq_score for item in jobs]) / len(jobs), 2) if jobs else 0.0
-    fraud_rate = round((len([item for item in jobs if item.fraud_risk_score > 60]) / len(jobs)) * 100, 2) if jobs else 0.0
-    return {
-        "total_inspections": total,
-        "completion_rate": round((completed / total) * 100, 2) if total else 0.0,
-        "auto_approved": auto_approved,
-        "avg_dsq": avg_dsq,
-        "avg_inference_ms": 1200,
-        "fraud_rate": fraud_rate,
-    }
-
-
-@app.get("/api/v1/dashboard/timeline")
-async def v1_dashboard_timeline(days: int = Query(default=7, ge=1, le=90), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    inspections = db.query(Inspection).filter(Inspection.organization_id == current_user.organization_id).all()
-    today = utc_now().date()
-    bucket: dict[str, int] = {}
-    for offset in range(days):
-        date_key = (today - timedelta(days=offset)).isoformat()
-        bucket[date_key] = 0
-    for inspection in inspections:
-        key = inspection.date.date().isoformat()
-        if key in bucket:
-            bucket[key] += 1
-    items = [{"date": date_key, "count": bucket[date_key]} for date_key in sorted(bucket.keys())]
-    return {"items": items}
-
-
-@app.post("/api/v1/webhooks/register", status_code=201)
-async def v1_register_webhook(
-    payload: V1WebhookRegisterRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    ensure_public_http_url(payload.target_url)
-    webhook = WebhookSubscription(
-        id=f"WH-{uuid.uuid4().hex[:10].upper()}",
-        organization_id=current_user.organization_id,
-        target_url=payload.target_url,
-        event_type=payload.event_type,
-        secret=payload.secret or uuid.uuid4().hex,
-        active=True,
-    )
-    db.add(webhook)
-    db.commit()
-    return {"id": webhook.id, "event_type": webhook.event_type, "target_url": webhook.target_url}
-
-
-@app.get("/api/v1/webhooks")
-async def v1_list_webhooks(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    webhooks = (
-        db.query(WebhookSubscription)
-        .filter(WebhookSubscription.organization_id == current_user.organization_id)
-        .order_by(WebhookSubscription.created_at.desc())
-        .all()
-    )
-    return {
-        "items": [
-            {
-                "id": item.id,
-                "target_url": item.target_url,
-                "event_type": item.event_type,
-                "active": item.active,
-                "created_at": isoformat_utc_z(item.created_at),
-            }
-            for item in webhooks
-        ]
-    }
-
-
-@app.delete("/api/v1/webhooks/{webhook_id}", status_code=204)
-async def v1_delete_webhook(webhook_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    webhook = (
-        db.query(WebhookSubscription)
-        .filter(
-            WebhookSubscription.id == webhook_id,
-            WebhookSubscription.organization_id == current_user.organization_id,
-        )
-        .first()
-    )
-    if not webhook:
-        raise HTTPException(status_code=404, detail="Webhook not found")
-    db.delete(webhook)
-    db.commit()
-    return Response(status_code=204)
-
-
-@app.post("/api/v1/webhooks/test/{webhook_id}")
-async def v1_test_webhook(webhook_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    webhook = (
-        db.query(WebhookSubscription)
-        .filter(
-            WebhookSubscription.id == webhook_id,
-            WebhookSubscription.organization_id == current_user.organization_id,
-        )
-        .first()
-    )
-    if not webhook:
-        raise HTTPException(status_code=404, detail="Webhook not found")
-    payload = {
-        "event": webhook.event_type,
-        "timestamp": isoformat_utc_z(utc_now()),
-        "status": "test",
-        "organization_id": current_user.organization_id,
-    }
-    signature = build_signature(webhook.secret, payload)
-    schedule = build_retry_schedule(max_attempts=5)
-    task_id = None
-    try:
-        task = deliver_webhook.delay(webhook.target_url, payload, signature)
-        task_id = task.id
-    except Exception:
-        task_id = None
-    return {
-        "webhook_id": webhook.id,
-        "signature": signature,
-        "payload": payload,
-        "delivered": True,
-        "task_id": task_id,
-        "retry_schedule": [isoformat_utc_z(item.scheduled_at) for item in schedule],
     }

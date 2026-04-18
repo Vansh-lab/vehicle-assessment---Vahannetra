@@ -1,9 +1,10 @@
 import os
 from pathlib import Path
-from typing import Generator
+from typing import AsyncGenerator, Generator
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.settings import settings
 
@@ -11,11 +12,27 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = os.getenv("VAHANNETRA_DB_PATH", settings.db_path or str(BASE_DIR / "vahannetra.db"))
 DATABASE_URL = os.getenv("VAHANNETRA_DATABASE_URL", settings.database_url or f"sqlite:///{DB_PATH}")
 
+
+def _derive_async_database_url(database_url: str) -> str:
+    if database_url.startswith("sqlite:///"):
+        return database_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return database_url
+
+
+ASYNC_DATABASE_URL = os.getenv("VAHANNETRA_ASYNC_DATABASE_URL", _derive_async_database_url(DATABASE_URL))
+
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+async_engine = create_async_engine(
+    ASYNC_DATABASE_URL,
+    connect_args={"check_same_thread": False} if ASYNC_DATABASE_URL.startswith("sqlite+aiosqlite") else {},
+)
+AsyncSessionLocal = async_sessionmaker(bind=async_engine, class_=AsyncSession, autocommit=False, autoflush=False)
 
 
 class Base(DeclarativeBase):
@@ -100,3 +117,11 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+    db = AsyncSessionLocal()
+    try:
+        yield db
+    finally:
+        await db.close()
