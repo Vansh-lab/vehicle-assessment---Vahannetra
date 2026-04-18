@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api/v1/system", tags=["system"])
 
 @router.get("/capabilities", response_model=CapabilityResponse)
 async def capabilities(
-    _: AuthPrincipal = Depends(get_current_principal),
+    _principal: AuthPrincipal = Depends(get_current_principal),
 ) -> CapabilityResponse:
     return CapabilityResponse(
         backend_foundation=True,

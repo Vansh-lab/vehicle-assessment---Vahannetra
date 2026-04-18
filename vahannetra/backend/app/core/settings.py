@@ -17,10 +17,12 @@ class Settings:
     access_token_minutes: int
     redis_url: str
     celery_broker_url: str
+    allowed_origins: tuple[str, ...]
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _DEFAULT_DB = _REPO_ROOT / "vahannetra" / "backend" / "vahannetra_phase2.db"
+_DEV_JWT_SECRET = "vahannetra-phase2-dev-secret"
 
 
 def _derive_async_db_url(database_url: str) -> str:
@@ -45,7 +47,7 @@ settings = Settings(
             os.getenv("VAHANNETRA_PHASE2_DATABASE_URL", f"sqlite:///{_DEFAULT_DB}")
         ),
     ),
-    jwt_secret=os.getenv("VAHANNETRA_PHASE2_JWT_SECRET", "phase2-demo-secret"),
+    jwt_secret=os.getenv("VAHANNETRA_PHASE2_JWT_SECRET", _DEV_JWT_SECRET),
     jwt_algorithm=os.getenv("VAHANNETRA_PHASE2_JWT_ALGORITHM", "HS256"),
     access_token_minutes=int(os.getenv("VAHANNETRA_PHASE2_ACCESS_TOKEN_MINUTES", "30")),
     redis_url=os.getenv("VAHANNETRA_PHASE2_REDIS_URL", "redis://localhost:6379/0"),
@@ -53,4 +55,18 @@ settings = Settings(
         "VAHANNETRA_PHASE2_CELERY_BROKER_URL",
         os.getenv("VAHANNETRA_PHASE2_REDIS_URL", "redis://localhost:6379/0"),
     ),
+    allowed_origins=tuple(
+        item.strip()
+        for item in os.getenv(
+            "VAHANNETRA_PHASE2_ALLOWED_ORIGINS", "http://localhost:3000"
+        ).split(",")
+        if item.strip()
+    ),
 )
+
+if settings.app_env != "development" and (
+    not settings.jwt_secret or settings.jwt_secret == _DEV_JWT_SECRET
+):
+    raise RuntimeError(
+        "VAHANNETRA_PHASE2_JWT_SECRET must be set for non-development environments."
+    )

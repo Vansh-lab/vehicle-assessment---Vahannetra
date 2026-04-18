@@ -13,9 +13,8 @@ router = APIRouter(prefix="/api/v1", tags=["analyze"])
 @router.post("/analyze", status_code=status.HTTP_202_ACCEPTED, response_model=AnalyzeAccepted)
 async def analyze(
     payload: AnalyzeInput,
-    principal: AuthPrincipal = Depends(get_current_principal),
+    _principal: AuthPrincipal = Depends(get_current_principal),
 ) -> AnalyzeAccepted:
-    _ = principal
     job_id = f"JOB-{uuid4().hex[:12].upper()}"
     return AnalyzeAccepted(
         job_id=job_id,
