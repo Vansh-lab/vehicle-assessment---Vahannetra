@@ -22,10 +22,12 @@ Set env (optional):
 ```bash
 VITE_API_BASE_URL=http://localhost:8000
 VITE_USE_BACKEND=true
+VITE_NOMINATIM_CONTACT_EMAIL=ops@example.com
 ```
 
 - `VITE_USE_BACKEND=true` enables real API call to `POST /assess-damage/`
 - otherwise mock API data is used for prototype flow
+- `VITE_NOMINATIM_CONTACT_EMAIL` identifies your application for OSM Nominatim reverse-geocode usage
 
 ## Information Architecture
 - Auth
