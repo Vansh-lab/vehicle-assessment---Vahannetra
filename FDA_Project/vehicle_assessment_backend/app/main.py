@@ -1,13 +1,13 @@
 import json
 import hmac
 import hashlib
+import ipaddress
 import math
 import os
 import random
 import re
-import urllib.error
+import socket
 import urllib.parse
-import urllib.request
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -67,6 +67,8 @@ SeverityLevel = Literal["low", "medium", "high"]
 InspectionStatus = Literal["Completed", "Pending", "Failed"]
 Theme = Literal["dark", "light"]
 UserRole = Literal["admin", "manager", "inspector"]
+MAX_PLATE_LENGTH = 12
+MIN_VIN_LENGTH = 17
 
 
 def utc_now() -> datetime:
@@ -257,6 +259,20 @@ def normalize_detection_type(raw_name: str) -> str:
     return "paint damage"
 
 
+def extension_for_content_type(content_type: str | None, fallback: str = ".bin") -> str:
+    if content_type == "image/png":
+        return ".png"
+    if content_type == "image/webp":
+        return ".webp"
+    if content_type in {"image/jpeg", "image/jpg"}:
+        return ".jpg"
+    if content_type == "video/mp4":
+        return ".mp4"
+    if content_type == "video/webm":
+        return ".webm"
+    return fallback
+
+
 def finding_from_detection(index: int, det: dict, severity: SeverityLevel, triage_category: str) -> DamageFinding:
     return DamageFinding(
         id=f"DMG-{index + 1}",
@@ -290,6 +306,26 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def ensure_public_http_url(raw_url: str) -> urllib.parse.ParseResult:
+    parsed = urllib.parse.urlparse(raw_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="Only public HTTP/HTTPS URLs are allowed")
+    if not parsed.hostname:
+        raise HTTPException(status_code=400, detail="Invalid URL host")
+    lowered = parsed.hostname.lower()
+    if lowered in {"localhost"} or lowered.endswith(".local"):
+        raise HTTPException(status_code=400, detail="Local/internal hosts are not allowed")
+    try:
+        addr_infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except socket.gaierror as exc:
+        raise HTTPException(status_code=400, detail=f"Unable to resolve host: {exc}") from exc
+    for info in addr_infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            raise HTTPException(status_code=400, detail="Internal/private host targets are not allowed")
+    return parsed
+
+
 def smart_score(distance_km: float, rating: float, is_open: bool, services_count: int) -> float:
     distance_component = 1 / max(distance_km, 0.1)
     return round(
@@ -309,8 +345,10 @@ def make_demo_vehicle(plate_or_vin: str) -> dict:
     make, model, fuel_type, is_ev = random.choice(catalog)
     year = random.randint(2018, 2025)
     return {
-        "number_plate": plate_or_vin if len(plate_or_vin) <= 12 else f"MH{random.randint(10, 50)}AB{random.randint(1000, 9999)}",
-        "vin": plate_or_vin if len(plate_or_vin) >= 17 else f"MA1{uuid.uuid4().hex[:14].upper()}",
+        "number_plate": (
+            plate_or_vin if len(plate_or_vin) <= MAX_PLATE_LENGTH else f"MH{random.randint(10, 50)}AB{random.randint(1000, 9999)}"
+        ),
+        "vin": plate_or_vin if len(plate_or_vin) >= MIN_VIN_LENGTH else f"MA1{uuid.uuid4().hex[:14].upper()}",
         "vehicle_type": "4W",
         "make": make,
         "model": model,
@@ -1179,7 +1217,7 @@ async def v1_analyze(
     for index, file in enumerate(files):
         payload = await file.read()
         validate_upload(file, payload)
-        safe_name = f"{uuid.uuid4().hex}_{re.sub(r'[^A-Za-z0-9._-]', '_', Path(file.filename or 'upload').name)}"
+        safe_name = f"img_{uuid.uuid4().hex}{extension_for_content_type(file.content_type, fallback='.jpg')}"
         file_path = UPLOAD_DIR / safe_name
         with open(file_path, "wb") as output_file:
             output_file.write(payload)
@@ -1206,33 +1244,16 @@ async def v1_analyze_url(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    parsed = urllib.parse.urlparse(image_url)
-    if parsed.scheme not in {"http", "https"}:
-        raise HTTPException(status_code=400, detail="Only public HTTP/HTTPS URLs are allowed")
+    ensure_public_http_url(image_url)
 
-    try:
-        with urllib.request.urlopen(image_url, timeout=8) as response:
-            payload = response.read()
-            content_type = response.headers.get_content_type()
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise HTTPException(status_code=400, detail=f"Unable to fetch image URL: {exc}") from exc
-
-    fake_upload = type("UrlUpload", (), {"content_type": content_type})()
-    validate_upload(fake_upload, payload)
-    filename = Path(parsed.path or "image.jpg").name
-    safe_name = f"{uuid.uuid4().hex}_{re.sub(r'[^A-Za-z0-9._-]', '_', filename)}"
-    file_path = UPLOAD_DIR / safe_name
-    with open(file_path, "wb") as output_file:
-        output_file.write(payload)
-
-    detections, processed_img_path = detector.analyze_vehicle(str(file_path))
     job = create_job_from_findings(
         db,
         current_user.organization_id,
-        detections,
+        [],
         input_type="photo",
-        annotated_key=f"uploads/{Path(processed_img_path).name}",
-        image_keys=[f"uploads/{safe_name}"],
+        annotated_key="",
+        image_keys=[image_url],
+        status="queued",
     )
     return V1AnalyzeAccepted(job_id=job.id, status="queued", message="URL analysis accepted")
 
@@ -1248,7 +1269,7 @@ async def v1_analyze_video(
     payload = await file.read()
     if not payload:
         raise HTTPException(status_code=400, detail="Uploaded video is empty")
-    safe_name = f"{uuid.uuid4().hex}_{re.sub(r'[^A-Za-z0-9._-]', '_', Path(file.filename or 'video.webm').name)}"
+    safe_name = f"video_{uuid.uuid4().hex}{extension_for_content_type(file.content_type, fallback='.webm')}"
     file_path = UPLOAD_DIR / safe_name
     with open(file_path, "wb") as output_file:
         output_file.write(payload)
@@ -1300,10 +1321,11 @@ async def v1_vehicle_lookup(
 ):
     if not plate and not vin:
         raise HTTPException(status_code=400, detail="Provide plate or vin")
+    normalized_plate = plate.upper() if plate else None
 
     query = db.query(Vehicle).filter(Vehicle.organization_id == current_user.organization_id)
-    if plate:
-        query = query.filter(Vehicle.number_plate.ilike(plate))
+    if normalized_plate:
+        query = query.filter(Vehicle.number_plate == normalized_plate)
     if vin:
         query = query.filter(Vehicle.vin.ilike(vin))
     record = query.first()
@@ -1552,9 +1574,7 @@ async def v1_register_webhook(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    parsed = urllib.parse.urlparse(payload.target_url)
-    if parsed.scheme not in {"http", "https"}:
-        raise HTTPException(status_code=400, detail="Webhook URL must use HTTP/HTTPS")
+    ensure_public_http_url(payload.target_url)
     webhook = WebhookSubscription(
         id=f"WH-{uuid.uuid4().hex[:10].upper()}",
         organization_id=current_user.organization_id,
@@ -1625,5 +1645,9 @@ async def v1_test_webhook(webhook_id: str, db: Session = Depends(get_db), curren
         "status": "test",
         "organization_id": current_user.organization_id,
     }
-    signature = hmac.new(webhook.secret.encode("utf-8"), json.dumps(payload).encode("utf-8"), "sha256").hexdigest()
+    signature = hmac.new(
+        webhook.secret.encode("utf-8"),
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
     return {"webhook_id": webhook.id, "signature": signature, "payload": payload, "delivered": True}

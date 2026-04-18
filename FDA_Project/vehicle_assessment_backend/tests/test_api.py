@@ -124,7 +124,7 @@ def test_v1_garages_webhooks_and_video_job():
     register = client.post(
         "/api/v1/webhooks/register",
         headers=headers,
-        json={"target_url": "https://example.com/hook", "event_type": "inspection.completed"},
+        json={"target_url": "https://github.com/webhook", "event_type": "inspection.completed"},
     )
     assert register.status_code == 201
     webhook_id = register.json()["id"]
