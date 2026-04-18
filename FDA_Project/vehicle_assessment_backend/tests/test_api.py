@@ -79,6 +79,8 @@ def test_v1_health_and_stats_endpoints():
     capabilities = client.get("/api/v1/system/capabilities", headers=headers)
     assert capabilities.status_code == 200
     assert len(capabilities.json()["pipeline_steps"]) == 14
+    assert "integrations" in capabilities.json()
+    assert "celery" in capabilities.json()
 
 
 def test_v1_vehicle_create_lookup_and_history():

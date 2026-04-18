@@ -14,7 +14,18 @@ class Settings:
     refresh_token_days: int
     redis_url: str
     celery_queue: str
+    celery_dlq_queue: str
+    celery_visibility_timeout_seconds: int
+    celery_soft_time_limit_seconds: int
+    celery_hard_time_limit_seconds: int
     s3_bucket: str
+    integration_mode: str
+    integration_timeout_seconds: float
+    integration_max_retries: int
+    integration_circuit_failures: int
+    integration_circuit_recovery_seconds: int
+    vahan_base_url: str
+    insurer_base_url: str
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -30,5 +41,16 @@ settings = Settings(
     refresh_token_days=int(os.getenv("VAHANNETRA_REFRESH_TOKEN_DAYS", "14")),
     redis_url=os.getenv("VAHANNETRA_REDIS_URL", "redis://redis:6379/0"),
     celery_queue=os.getenv("VAHANNETRA_CELERY_QUEUE", "vehicle_assessment"),
+    celery_dlq_queue=os.getenv("VAHANNETRA_CELERY_DLQ_QUEUE", "vehicle_assessment_dlq"),
+    celery_visibility_timeout_seconds=int(os.getenv("VAHANNETRA_CELERY_VISIBILITY_TIMEOUT_SECONDS", "3600")),
+    celery_soft_time_limit_seconds=int(os.getenv("VAHANNETRA_CELERY_SOFT_TIME_LIMIT_SECONDS", "20")),
+    celery_hard_time_limit_seconds=int(os.getenv("VAHANNETRA_CELERY_HARD_TIME_LIMIT_SECONDS", "30")),
     s3_bucket=os.getenv("VAHANNETRA_S3_BUCKET", "vahannetra-artifacts"),
+    integration_mode=os.getenv("VAHANNETRA_INTEGRATION_MODE", "mock"),
+    integration_timeout_seconds=float(os.getenv("VAHANNETRA_INTEGRATION_TIMEOUT_SECONDS", "5")),
+    integration_max_retries=int(os.getenv("VAHANNETRA_INTEGRATION_MAX_RETRIES", "2")),
+    integration_circuit_failures=int(os.getenv("VAHANNETRA_INTEGRATION_CIRCUIT_FAILURES", "3")),
+    integration_circuit_recovery_seconds=int(os.getenv("VAHANNETRA_INTEGRATION_CIRCUIT_RECOVERY_SECONDS", "30")),
+    vahan_base_url=os.getenv("VAHANNETRA_VAHAN_BASE_URL", "https://vahan.example"),
+    insurer_base_url=os.getenv("VAHANNETRA_INSURER_BASE_URL", "https://insurer.example"),
 )

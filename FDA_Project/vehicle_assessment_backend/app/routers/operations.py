@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user_async, require_roles_async
 from app.database import get_async_db
 from app.db_models import Claim, Inspection, User
+from app.services.connectors import IntegrationError, get_insurer_connector
 
 router = APIRouter(tags=["operations"])
+insurer_connector = get_insurer_connector()
 
 SeverityLevel = Literal["low", "medium", "high"]
 InspectionStatus = Literal["Completed", "Pending", "Failed"]
@@ -128,12 +130,24 @@ async def submit_claim(
         raise HTTPException(status_code=404, detail="Inspection not found")
 
     claim_id = f"CLM-{uuid.uuid4().hex[:10].upper()}"
-    provider_ref = f"{payload.destination.upper()}-{uuid.uuid4().hex[:8]}"
+    claim_status = "Submitted"
+    try:
+        connector_response = await insurer_connector.submit_claim(
+            inspection_id=inspection.id,
+            destination=payload.destination,
+            organization_id=current_user.organization_id,
+        )
+        provider_ref = connector_response.provider_reference
+        claim_status = "Submitted" if connector_response.accepted else "Queued"
+    except IntegrationError:
+        provider_ref = f"{payload.destination.upper()}-PENDING-{uuid.uuid4().hex[:6]}"
+        claim_status = "Queued"
+
     claim = Claim(
         id=claim_id,
         inspection_id=inspection.id,
         organization_id=current_user.organization_id,
-        status="Submitted",
+        status=claim_status,
         provider_ref=provider_ref,
     )
     db.add(claim)
@@ -142,6 +156,6 @@ async def submit_claim(
     return ClaimSubmitResponse(
         claim_id=claim_id,
         inspection_id=inspection.id,
-        status="Submitted",
+        status=claim_status,
         provider_reference=provider_ref,
     )

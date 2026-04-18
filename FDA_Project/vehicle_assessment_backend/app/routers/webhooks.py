@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+from celery.exceptions import CeleryError
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -134,7 +135,7 @@ async def v1_test_webhook(
     try:
         task = deliver_webhook.delay(webhook.target_url, payload, signature)
         task_id = task.id
-    except Exception:
+    except CeleryError:
         task_id = None
 
     return {
