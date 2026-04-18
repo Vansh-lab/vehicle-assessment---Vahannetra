@@ -2,7 +2,6 @@ from fastapi.testclient import TestClient
 
 from app.main import app, init_seed_data
 
-
 init_seed_data()
 client = TestClient(app)
 
@@ -126,14 +125,19 @@ def test_v1_garages_webhooks_and_video_job():
     assert pricing.status_code == 200
     assert "pricing" in pricing.json()
 
-    centers = client.get("/api/v1/garages/insurance-centers?lat=19.07&lng=72.87", headers=headers)
+    centers = client.get(
+        "/api/v1/garages/insurance-centers?lat=19.07&lng=72.87", headers=headers
+    )
     assert centers.status_code == 200
     assert isinstance(centers.json()["items"], list)
 
     register = client.post(
         "/api/v1/webhooks/register",
         headers=headers,
-        json={"target_url": "https://github.com/webhook", "event_type": "inspection.completed"},
+        json={
+            "target_url": "https://github.com/webhook",
+            "event_type": "inspection.completed",
+        },
     )
     assert register.status_code == 201
     webhook_id = register.json()["id"]

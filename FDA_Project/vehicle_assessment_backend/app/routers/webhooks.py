@@ -4,7 +4,9 @@ from typing import Optional
 
 from celery.exceptions import CeleryError
 from fastapi import APIRouter, Depends, HTTPException
+from kombu.exceptions import OperationalError as KombuOperationalError
 from pydantic import BaseModel
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -135,7 +137,7 @@ async def v1_test_webhook(
     try:
         task = deliver_webhook.delay(webhook.target_url, payload, signature)
         task_id = task.id
-    except CeleryError:
+    except (CeleryError, KombuOperationalError, RedisError):
         task_id = None
 
     return {

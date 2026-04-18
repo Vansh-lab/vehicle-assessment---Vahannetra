@@ -111,7 +111,9 @@ async def _request_json(
             last_error = IntegrationTimeoutError(f"{circuit.name} timeout: {exc}")
         except (httpx.HTTPError, ValueError) as exc:
             circuit.on_failure()
-            last_error = IntegrationUnavailableError(f"{circuit.name} unavailable: {exc}")
+            last_error = IntegrationUnavailableError(
+                f"{circuit.name} unavailable: {exc}"
+            )
 
         if attempt < max_retries:
             await asyncio.sleep(min(0.2 * (2**attempt), 1.0))
