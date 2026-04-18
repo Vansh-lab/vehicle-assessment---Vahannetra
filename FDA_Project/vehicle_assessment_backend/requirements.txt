@@ -8,6 +8,7 @@ pydantic
 sqlalchemy==2.0.39
 alembic==1.13.2
 asyncpg==0.29.0
+psycopg2-binary==2.9.10
 aiosqlite==0.20.0
 celery==5.4.0
 redis==5.0.8

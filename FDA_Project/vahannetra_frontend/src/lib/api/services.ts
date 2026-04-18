@@ -426,14 +426,26 @@ export function getInspectionReportUrl(id: string) {
   return `${API_BASE_URL}/inspections/${id}/report.pdf`;
 }
 
+function triggerBrowserDownload(url: string, fileName: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.rel = "noopener noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+}
 
-export async function downloadInspectionReport(id: string): Promise<string> {
+
+export async function downloadInspectionReport(id: string): Promise<void> {
   if (!USE_BACKEND) {
-    return getInspectionReportUrl(id);
+    window.open(getInspectionReportUrl(id), "_blank", "noopener,noreferrer");
+    return;
   }
   const blob = await apiBinaryRequest(`/inspections/${id}/report.pdf`);
   const url = URL.createObjectURL(blob);
-  return url;
+  triggerBrowserDownload(url, `${id}.pdf`);
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 export async function submitClaim(inspectionId: string, destination = "default-claims-provider"): Promise<ClaimSubmitResponse> {

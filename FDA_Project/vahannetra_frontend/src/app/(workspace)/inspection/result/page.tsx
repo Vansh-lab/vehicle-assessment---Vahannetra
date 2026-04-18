@@ -44,9 +44,6 @@ export default function ResultPage() {
 
   const downloadMutation = useMutation({
     mutationFn: () => downloadInspectionReport(result.inspectionId),
-    onSuccess: (url) => {
-      window.open(url, "_blank", "noopener,noreferrer");
-    },
   });
 
   const confidence = useMemo(() => {
@@ -80,6 +77,40 @@ export default function ResultPage() {
     [groupedCount],
   );
   const topDamageType = result.findings[0]?.type ?? "major";
+  const scratchSummary = useMemo(() => {
+    const scratchFindings = result.findings.filter((finding) => finding.type === "scratch");
+    const total = scratchFindings.length;
+    if (total === 0) {
+      return {
+        total: 0,
+        avgConfidence: 0,
+        hotspot: "No scratch hotspot detected",
+        areaPct: 0,
+      };
+    }
+    const avgConfidence = Math.round(
+      (scratchFindings.reduce((sum, finding) => sum + finding.confidence, 0) / total) * 100,
+    );
+    const areaTotal = scratchFindings.reduce((sum, finding) => {
+      const [x1, y1, x2, y2] = finding.box;
+      return sum + Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+    }, 0);
+    const frameArea = Math.max(
+      1,
+      result.findings.reduce((maxArea, finding) => {
+        const [x1, y1, x2, y2] = finding.box;
+        return Math.max(maxArea, Math.max(0, x2) * Math.max(0, y2), Math.max(0, x1) * Math.max(0, y1));
+      }, 1),
+    );
+    const avgXCenter = scratchFindings.reduce((sum, finding) => sum + (finding.box[0] + finding.box[2]) / 2, 0) / total;
+    const hotspot = avgXCenter < 140 ? "Left side" : avgXCenter < 280 ? "Center" : "Right side";
+    return {
+      total,
+      avgConfidence,
+      hotspot,
+      areaPct: Math.min(100, Math.round((areaTotal / frameArea) * 100)),
+    };
+  }, [result.findings]);
 
   const garagesQuery = useQuery({
     queryKey: ["nearby-garages", topDamageType],
@@ -109,6 +140,16 @@ export default function ResultPage() {
               {key}: {value}
             </Badge>
           ))}
+        </div>
+      </Card>
+
+      <Card>
+        <p className="mb-2 text-sm font-semibold text-slate-100">Scratch summary</p>
+        <div className="grid gap-2 text-sm text-slate-200 md:grid-cols-2">
+          <p>Total scratches: <span className="font-semibold text-cyan-100">{scratchSummary.total}</span></p>
+          <p>Avg confidence: <span className="font-semibold text-cyan-100">{scratchSummary.avgConfidence}%</span></p>
+          <p>Estimated scratch coverage: <span className="font-semibold text-cyan-100">{scratchSummary.areaPct}%</span></p>
+          <p>Hotspot zone: <span className="font-semibold text-cyan-100">{scratchSummary.hotspot}</span></p>
         </div>
       </Card>
 

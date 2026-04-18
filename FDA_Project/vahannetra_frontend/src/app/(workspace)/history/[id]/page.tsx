@@ -21,9 +21,6 @@ export default function HistoryDetailPage() {
 
   const downloadMutation = useMutation({
     mutationFn: async () => downloadInspectionReport(id),
-    onSuccess: (url) => {
-      window.open(url, "_blank", "noopener,noreferrer");
-    },
   });
 
   if (isLoading) return <Skeleton className="h-44" />;
