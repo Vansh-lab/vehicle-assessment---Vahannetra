@@ -110,7 +110,6 @@ jobs:
     name: Deploy (placeholder)
     runs-on: ubuntu-latest
     needs: [test, backend-quality, build]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
       - name: Deploy placeholder
         run: echo "Deployment stage scaffold is ready."
