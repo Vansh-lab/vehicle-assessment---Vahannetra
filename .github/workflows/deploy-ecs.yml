@@ -24,6 +24,7 @@ env:
   BENCHMARK_URL_6: ${{ vars.BENCHMARK_URL_6 || 'https://example.invalid/api/v1/system/queue/observability' }}
   BENCHMARK_URL_7: ${{ vars.BENCHMARK_URL_7 || 'https://example.invalid/dashboard/overview' }}
   BENCHMARK_URL_8: ${{ vars.BENCHMARK_URL_8 || 'https://example.invalid/' }}
+  BENCHMARK_ACCEPTABLE_CODES: ${{ vars.BENCHMARK_ACCEPTABLE_CODES || '200,201,202,204,301,302,401,403' }}
 
 jobs:
   build-and-push:
@@ -109,11 +110,22 @@ jobs:
           mkdir -p perf
           : > perf/timed-benchmark.csv
           echo "target,http_code,time_total,time_connect,time_starttransfer" > perf/timed-benchmark.csv
+          IFS=',' read -r -a acceptable_codes <<< "$BENCHMARK_ACCEPTABLE_CODES"
+          is_acceptable_code() {
+            local input="$1"
+            for allowed in "${acceptable_codes[@]}"; do
+              if [[ "$allowed" == "$input" ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
           for target in "$BENCHMARK_URL_1" "$BENCHMARK_URL_2" "$BENCHMARK_URL_3" "$BENCHMARK_URL_4" "$BENCHMARK_URL_5" "$BENCHMARK_URL_6" "$BENCHMARK_URL_7" "$BENCHMARK_URL_8"; do
             metrics=$(curl -sS -o /dev/null -w "%{http_code},%{time_total},%{time_connect},%{time_starttransfer}" "$target" || echo "000,0,0,0")
             echo "$target,$metrics" >> perf/timed-benchmark.csv
             code=$(echo "$metrics" | cut -d',' -f1)
-            if [[ "$code" == "000" || "$code" -ge 500 ]]; then
+            if [[ "$code" == "000" ]] || ! is_acceptable_code "$code"; then
               echo "Health gate failed for $target with code=$code"
               exit 1
             fi
