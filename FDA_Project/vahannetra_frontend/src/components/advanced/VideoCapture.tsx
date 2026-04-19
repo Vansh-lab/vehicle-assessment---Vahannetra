@@ -89,7 +89,7 @@ export function VideoCapture({ onVideoReady, onCapture }: VideoCaptureProps) {
     chunksRef.current = [];
     const mimeType = preferredRecordingMimeType();
     if (!mimeType) {
-      setCaptureError("Recording is not supported in this browser. Please upload an MP4 video file.");
+      setCaptureError("Recording is not supported in this browser. Please upload MP4, MOV, or WEBM video.");
       return;
     }
     const recorder = new MediaRecorder(streamRef.current, { mimeType });

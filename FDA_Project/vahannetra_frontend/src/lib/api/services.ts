@@ -242,6 +242,9 @@ export async function analyzeVideoWithBackend(
   const severity = mapSeverityFromScore(dsq);
   const primaryType: ResultResponse["findings"][number]["type"] =
     severity === "high" ? "dent" : severity === "medium" ? "scratch" : "paint damage";
+  const processedImageUrl = mapped?.annotated_output && /^https?:\/\//.test(mapped.annotated_output)
+    ? mapped.annotated_output
+    : "/window.svg";
 
   return {
     inspectionId: mapped?.job_id ?? accepted.job_id,
@@ -254,7 +257,7 @@ export async function analyzeVideoWithBackend(
     },
     healthScore: Math.max(0, 100 - dsq),
     triageCategory: dsq >= 34 ? "STRUCTURAL/FUNCTIONAL" : "COSMETIC",
-    processedImageUrl: "/window.svg",
+    processedImageUrl,
     findings: [
       {
         id: "DMG-VIDEO-1",

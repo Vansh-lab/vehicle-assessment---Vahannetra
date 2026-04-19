@@ -23,9 +23,7 @@ export function DamageCard({ finding }: { finding: DamageFinding }) {
         </Badge>
       </div>
       <p className="text-xs text-slate-300">{finding.explainability}</p>
-      <p className="text-xs text-slate-300">
-        Location: x {centerX}, y {centerY} • Box: {Math.round(width)} × {Math.round(height)} px
-      </p>
+      <p className="text-xs text-slate-300">Center: ({centerX}px, {centerY}px) • Box: {Math.round(width)} × {Math.round(height)} px</p>
       <p className="text-sm font-medium text-cyan-100">
         Estimate {formatCurrency(finding.estimateMin)} - {formatCurrency(finding.estimateMax)}
       </p>

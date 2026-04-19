@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,6 +51,7 @@ def start_pipeline(job_id: str) -> PipelineExecution:
 
 detector = DamageDetector()
 storage_service = ArtifactStorageService()
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -296,6 +298,9 @@ async def run_video_pipeline_async(job_id: str, local_video_path: str) -> None:
             )
             await session.commit()
         except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "Video pipeline failed for job_id=%s at step=%s", job_id, current_step
+            )
             await _mark_failed(session, job, current_step, completed_steps, str(exc))
 
 
@@ -309,5 +314,10 @@ def queue_video_pipeline(job_id: str, local_video_path: str) -> tuple[bool, str 
         task = process_video_pipeline.delay(job_id, local_video_path)
         return True, task.id
     except Exception:  # noqa: BLE001
+        logger.exception(
+            "Celery queue fallback invoked for job_id=%s local_video_path=%s",
+            job_id,
+            local_video_path,
+        )
         asyncio.run(run_video_pipeline_async(job_id, local_video_path))
         return False, None

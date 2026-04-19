@@ -9,6 +9,11 @@ import { Card } from "@/components/ui/card";
 import { env } from "@/lib/env";
 
 type Position = { lat: number; lng: number } | null;
+const WAVE_BAR_DELAY_MS = 70;
+const WAVE_BAR_BASE_HEIGHT_PX = 10;
+const WAVE_BAR_HEIGHT_STEP_PX = 5;
+const WAVE_BAR_VARIANTS = 3;
+
 type SpeechRecognitionCtor = new () => {
   lang: string;
   interimResults: boolean;
@@ -245,7 +250,10 @@ export function GeoVoiceReportPanel({ findings, triageCategory, healthScore }: G
             <span
               key={bar}
               className="w-1 animate-pulse rounded bg-cyan-300"
-              style={{ animationDelay: `${bar * 70}ms`, height: `${10 + ((bar % 3) * 5)}px` }}
+              style={{
+                animationDelay: `${bar * WAVE_BAR_DELAY_MS}ms`,
+                height: `${WAVE_BAR_BASE_HEIGHT_PX + ((bar % WAVE_BAR_VARIANTS) * WAVE_BAR_HEIGHT_STEP_PX)}px`,
+              }}
             />
           ))}
           <span className="text-xs text-cyan-200">
