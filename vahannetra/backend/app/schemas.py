@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -31,6 +31,10 @@ class AnalyzeAccepted(BaseModel):
 class AnalyzeInput(BaseModel):
     media_type: str = Field(default="image", pattern="^(image|video|multi)$")
     source_count: int = Field(default=1, ge=1, le=10)
+
+
+class AnalyzeUrlInput(BaseModel):
+    source_url: AnyHttpUrl
 
 
 class PrincipalResponse(BaseModel):

@@ -53,6 +53,14 @@ async def set_job_status(db: AsyncSession, *, job_id: str, status: str) -> None:
     await db.commit()
 
 
+async def set_job_result_json(db: AsyncSession, *, job_id: str, result_json: str) -> None:
+    job = await get_job(db, job_id)
+    if job is None:
+        return
+    job.result_json = result_json
+    await db.commit()
+
+
 async def get_job(db: AsyncSession, job_id: str) -> AssessmentJob | None:
     result = await db.execute(
         select(AssessmentJob).where(AssessmentJob.id == job_id)

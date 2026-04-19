@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -8,8 +9,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vahannetra.backend.app.auth import AuthPrincipal, get_current_principal
 from vahannetra.backend.app.core.settings import settings
 from vahannetra.backend.app.database import get_async_db
-from vahannetra.backend.app.schemas import AnalyzeAccepted, AnalyzeInput, utc_now_iso
-from vahannetra.backend.app.services.jobs import append_job_frame, create_job, set_job_status
+from vahannetra.backend.app.schemas import (
+    AnalyzeAccepted,
+    AnalyzeInput,
+    AnalyzeUrlInput,
+    utc_now_iso,
+)
+from vahannetra.backend.app.services.jobs import (
+    append_job_frame,
+    create_job,
+    set_job_result_json,
+    set_job_status,
+)
 from vahannetra.backend.app.services.storage import storage_service
 from vahannetra.backend.app.services.video_processing import extract_best_frames
 from vahannetra.backend.app.tasks.pipeline import enqueue_pipeline
@@ -38,6 +49,33 @@ async def analyze(
         job_id=job.id,
         status=job_status,
         message=f"Accepted {payload.media_type} payload with {payload.source_count} source(s)",
+        queued_at=utc_now_iso(),
+    )
+
+
+@router.post(
+    "/analyze/url", status_code=status.HTTP_202_ACCEPTED, response_model=AnalyzeAccepted
+)
+async def analyze_url(
+    payload: AnalyzeUrlInput,
+    _principal: AuthPrincipal = Depends(get_current_principal),
+    db: AsyncSession = Depends(get_async_db),
+) -> AnalyzeAccepted:
+    job = await create_job(db, input_type="url", source_count=1)
+    await set_job_result_json(
+        db, job_id=job.id, result_json=json.dumps({"source_url": str(payload.source_url)})
+    )
+
+    dispatch_state = enqueue_pipeline(job.id)
+    job_status = "queued"
+    if dispatch_state == "dispatched":
+        job_status = "processing"
+        await set_job_status(db, job_id=job.id, status="processing")
+
+    return AnalyzeAccepted(
+        job_id=job.id,
+        status=job_status,
+        message=f"URL analysis accepted for {payload.source_url.host or 'source'}",
         queued_at=utc_now_iso(),
     )
 
