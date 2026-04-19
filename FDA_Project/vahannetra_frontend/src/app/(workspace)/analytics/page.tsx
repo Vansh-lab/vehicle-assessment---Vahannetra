@@ -2,14 +2,12 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis, PieChart, Pie, Cell } from "recharts";
 import { getAnalytics } from "@/lib/api/services";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/states/error-state";
 
 const pieColors = ["#00e5ff", "#35d48d", "#ffb648", "#ff5a7a", "#9f7aea"];
-const chartHeight = 256;
 
 function hasSameSize(a: { width: number; height: number }, b: { width: number; height: number }) {
   return a.width === b.width && a.height === b.height;
@@ -46,6 +44,39 @@ function ChartCanvas({ children }: { children: (size: { width: number; height: n
   );
 }
 
+function setupCanvas(canvas: HTMLCanvasElement, width: number, height: number) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(width * dpr);
+  canvas.height = Math.floor(height * dpr);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+
+function CanvasChart({
+  size,
+  draw,
+}: {
+  size: { width: number; height: number };
+  draw: (ctx: CanvasRenderingContext2D, width: number, height: number) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || size.width <= 0 || size.height <= 0) return;
+    const ctx = setupCanvas(canvas, size.width, size.height);
+    if (!ctx) return;
+    ctx.clearRect(0, 0, size.width, size.height);
+    draw(ctx, size.width, size.height);
+  }, [draw, size.height, size.width]);
+
+  return <canvas ref={canvasRef} className="h-full w-full rounded-lg bg-slate-900/20" />;
+}
+
 export default function AnalyticsPage() {
   const { data, isLoading, isError, refetch } = useQuery({ queryKey: ["analytics"], queryFn: getAnalytics });
   if (isLoading) return <Skeleton className="h-64" />;
@@ -56,48 +87,147 @@ export default function AnalyticsPage() {
       <Card>
         <p className="text-lg font-semibold text-slate-100">Severity Trends</p>
         <ChartCanvas>
-          {({ width, height }) => (
-            <BarChart width={width} height={height || chartHeight} data={data.trends}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-              <XAxis dataKey="month" stroke="#93a3be" />
-              <YAxis stroke="#93a3be" />
-              <Tooltip />
-              <Bar dataKey="low" fill="#35d48d" radius={[6, 6, 0, 0]} />
-              <Bar dataKey="medium" fill="#ffb648" radius={[6, 6, 0, 0]} />
-              <Bar dataKey="high" fill="#ff5a7a" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          )}
+          {({ width, height }) => {
+            const maxY = Math.max(...data.trends.map((item) => item.low + item.medium + item.high), 1);
+            return (
+              <CanvasChart
+                size={{ width, height }}
+                draw={(ctx, chartWidth, chartHeight) => {
+                  const margin = { top: 18, right: 16, bottom: 34, left: 40 };
+                  const innerWidth = chartWidth - margin.left - margin.right;
+                  const innerHeight = chartHeight - margin.top - margin.bottom;
+                  const barGroupWidth = innerWidth / data.trends.length;
+                  const barWidth = Math.max(8, barGroupWidth / 5);
+
+                  ctx.strokeStyle = "rgba(255,255,255,0.15)";
+                  ctx.lineWidth = 1;
+                  ctx.beginPath();
+                  ctx.moveTo(margin.left, margin.top);
+                  ctx.lineTo(margin.left, chartHeight - margin.bottom);
+                  ctx.lineTo(chartWidth - margin.right, chartHeight - margin.bottom);
+                  ctx.stroke();
+
+                  data.trends.forEach((row, index) => {
+                    const xBase = margin.left + index * barGroupWidth + barGroupWidth / 2 - barWidth * 1.7;
+                    const bars = [
+                      { value: row.low, color: "#35d48d" },
+                      { value: row.medium, color: "#ffb648" },
+                      { value: row.high, color: "#ff5a7a" },
+                    ];
+
+                    bars.forEach((bar, barIndex) => {
+                      const barHeight = (bar.value / maxY) * innerHeight;
+                      const x = xBase + barIndex * (barWidth + 4);
+                      const y = margin.top + innerHeight - barHeight;
+                      ctx.fillStyle = bar.color;
+                      ctx.fillRect(x, y, barWidth, barHeight);
+                    });
+
+                    ctx.fillStyle = "#93a3be";
+                    ctx.font = "11px sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.fillText(row.month, margin.left + index * barGroupWidth + barGroupWidth / 2, chartHeight - 12);
+                  });
+                }}
+              />
+            );
+          }}
         </ChartCanvas>
       </Card>
 
       <Card>
         <p className="text-lg font-semibold text-slate-100">Damage Distribution</p>
         <ChartCanvas>
-          {({ width, height }) => (
-            <PieChart width={width} height={height || chartHeight}>
-              <Pie data={data.distribution} dataKey="count" nameKey="category" outerRadius={95} label>
-                {data.distribution.map((entry, index) => (
-                  <Cell key={entry.category} fill={pieColors[index % pieColors.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          )}
+          {({ width, height }) => {
+            const total = data.distribution.reduce((sum, item) => sum + item.count, 0) || 1;
+            return (
+              <CanvasChart
+                size={{ width, height }}
+                draw={(ctx, chartWidth, chartHeight) => {
+                  const centerX = chartWidth * 0.35;
+                  const centerY = chartHeight * 0.5;
+                  const radius = Math.min(chartWidth, chartHeight) * 0.28;
+                  let startAngle = -Math.PI / 2;
+
+                  data.distribution.forEach((item, index) => {
+                    const slice = (item.count / total) * Math.PI * 2;
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, centerY);
+                    ctx.arc(centerX, centerY, radius, startAngle, startAngle + slice);
+                    ctx.closePath();
+                    ctx.fillStyle = pieColors[index % pieColors.length];
+                    ctx.fill();
+                    startAngle += slice;
+                  });
+
+                  ctx.font = "12px sans-serif";
+                  ctx.textAlign = "left";
+                  data.distribution.forEach((item, index) => {
+                    const y = 24 + index * 20;
+                    const x = chartWidth * 0.65;
+                    ctx.fillStyle = pieColors[index % pieColors.length];
+                    ctx.fillRect(x, y - 10, 10, 10);
+                    ctx.fillStyle = "#cbd5e1";
+                    ctx.fillText(`${item.category} (${item.count})`, x + 16, y);
+                  });
+                }}
+              />
+            );
+          }}
         </ChartCanvas>
       </Card>
 
       <Card>
         <p className="text-lg font-semibold text-slate-100">Vehicle-wise Risk Ranking</p>
         <ChartCanvas>
-          {({ width, height }) => (
-            <LineChart width={width} height={height || chartHeight} data={data.riskRanking}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-              <XAxis dataKey="model" stroke="#93a3be" />
-              <YAxis stroke="#93a3be" />
-              <Tooltip />
-              <Line type="monotone" dataKey="risk" stroke="#00e5ff" strokeWidth={3} />
-            </LineChart>
-          )}
+          {({ width, height }) => {
+            const maxRisk = Math.max(...data.riskRanking.map((item) => item.risk), 1);
+            return (
+              <CanvasChart
+                size={{ width, height }}
+                draw={(ctx, chartWidth, chartHeight) => {
+                  const margin = { top: 20, right: 20, bottom: 42, left: 40 };
+                  const innerWidth = chartWidth - margin.left - margin.right;
+                  const innerHeight = chartHeight - margin.top - margin.bottom;
+
+                  ctx.strokeStyle = "rgba(255,255,255,0.15)";
+                  ctx.lineWidth = 1;
+                  ctx.beginPath();
+                  ctx.moveTo(margin.left, margin.top);
+                  ctx.lineTo(margin.left, chartHeight - margin.bottom);
+                  ctx.lineTo(chartWidth - margin.right, chartHeight - margin.bottom);
+                  ctx.stroke();
+
+                  ctx.strokeStyle = "#00e5ff";
+                  ctx.lineWidth = 2.5;
+                  ctx.beginPath();
+                  data.riskRanking.forEach((item, index) => {
+                    const x =
+                      margin.left +
+                      (data.riskRanking.length === 1
+                        ? innerWidth / 2
+                        : (index / (data.riskRanking.length - 1)) * innerWidth);
+                    const y = margin.top + innerHeight - (item.risk / maxRisk) * innerHeight;
+                    if (index === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                  });
+                  ctx.stroke();
+
+                  ctx.fillStyle = "#93a3be";
+                  ctx.font = "11px sans-serif";
+                  ctx.textAlign = "center";
+                  data.riskRanking.forEach((item, index) => {
+                    const x =
+                      margin.left +
+                      (data.riskRanking.length === 1
+                        ? innerWidth / 2
+                        : (index / (data.riskRanking.length - 1)) * innerWidth);
+                    ctx.fillText(item.model, x, chartHeight - 12);
+                  });
+                }}
+              />
+            );
+          }}
         </ChartCanvas>
       </Card>
     </div>

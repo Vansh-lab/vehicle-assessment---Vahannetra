@@ -105,6 +105,11 @@ export interface VideoAnalyzeAccepted {
 export interface VideoResultPayload {
   job_id: string;
   status: string;
+  current_step?: string;
+  total_steps?: number;
+  completed_steps?: string[];
+  pipeline_error?: string;
+  annotated_output?: string;
   input_type: string;
   dsq_score: number;
   overall_severity: "low" | "medium" | "high";

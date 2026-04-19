@@ -5,6 +5,7 @@ on:
     branches: ["main", "master", "copilot/**"]
   pull_request:
     branches: ["main", "master"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -44,8 +45,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt pytest-asyncio pytest-cov
+      - name: Install dependencies (retry on transient network/SSL)
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          for attempt in 1 2; do
+            if python -m pip install --retries 5 --timeout 60 -r requirements.txt pytest-asyncio pytest-cov; then
+              break
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              echo "Dependency install failed after ${attempt} attempts."
+              exit 1
+            fi
+            echo "Install attempt ${attempt} failed; retrying in 15s..."
+            sleep 15
+          done
+      - name: Enforce DSQ 47-case matrix contract
+        run: |
+          CASE_COUNT=$(PYTHONPATH=. pytest tests/test_dsq_v2.py --collect-only -q | grep -c "test_dsq_v2_47_case_matrix_contract\\[case")
+          echo "Collected DSQ matrix cases: ${CASE_COUNT}"
+          test "${CASE_COUNT}" -eq 47
       - name: Run pytest + coverage
         env:
           VAHANNETRA_DATABASE_URL: postgresql://vahannetra:password@localhost:5432/vahannetra_db
@@ -64,8 +83,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install lint dependencies
-        run: python -m pip install -r requirements.txt black ruff
+      - name: Install lint dependencies (retry on transient network/SSL)
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          for attempt in 1 2; do
+            if python -m pip install --retries 5 --timeout 60 -r requirements.txt black ruff; then
+              break
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              echo "Lint dependency install failed after ${attempt} attempts."
+              exit 1
+            fi
+            echo "Lint install attempt ${attempt} failed; retrying in 15s..."
+            sleep 15
+          done
       - name: Black check
         run: black --check app tests
       - name: Ruff check

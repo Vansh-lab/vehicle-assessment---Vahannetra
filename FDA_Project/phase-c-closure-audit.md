@@ -21,6 +21,8 @@
 ### CI/Workflow
 
 - Deploy workflow present with ECS/ECR deploy + health gates + rollback + perf artifact capture.
+- CI dependency install hardened with retry/backoff to reduce transient pip SSL/network failures during large wheel downloads.
+- CodeQL workflow can execute successfully on rerun attempts, but Copilot-triggered push runs may still conclude `action_required` with zero jobs.
 
 ---
 
@@ -40,20 +42,21 @@ Runbook:
 
 - `FDA_Project/aws-runtime-proof-runbook.md`
 
-### 2) CodeQL workflow conclusion `action_required` (platform/settings dependent)
+### 2) Final CI/CodeQL verification on release head (rerun path works; push trigger still flaky)
 
 Observed:
 
-- Recent runs conclude `action_required` with no jobs executed.
+- CI and CodeQL jobs execute successfully on manual/rerun attempts.
+- Copilot-triggered push runs may still conclude `action_required` with zero jobs.
+- A recent CI failure was transient during pip dependency download (`ssl.SSLError`) in test job install step.
 
-Likely external blockers:
+What changed:
 
-- repository/org security feature/permissions not fully enabled for code scanning, or
-- workflow approval/policy gate at repository settings level.
+- CI workflow now includes retry/backoff for dependency installs in both test and lint jobs.
 
 What remains:
 
-- Repo admin to enable/approve CodeQL execution in GitHub settings and rerun workflow.
+- Run CI and CodeQL from workflow rerun/manual dispatch on the final release head and archive successful run links in closure evidence.
 
 ---
 
@@ -93,7 +96,6 @@ Done:
 Remaining true blockers (external-runtime only):
 
 - Live AWS runtime proof execution and evidence capture in org AWS environment.
-- CodeQL platform/settings remediation so scan jobs execute.
 
 ---
 
@@ -101,5 +103,5 @@ Remaining true blockers (external-runtime only):
 
 - [ ] Live AWS deploy run succeeded with perf evidence artifact.
 - [ ] Live AWS rollback scenario executed and verified.
-- [ ] CodeQL workflow runs to completion (jobs actually executed).
+- [ ] CodeQL green on final release head commit.
 - [ ] CI, frontend, backend validations green on final head commit.

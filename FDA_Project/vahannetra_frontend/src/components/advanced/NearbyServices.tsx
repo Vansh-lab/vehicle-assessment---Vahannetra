@@ -44,9 +44,9 @@ function PricingTable({
       <thead>
         <tr className="text-left text-slate-400">
           <th className="py-1 pr-2">Service</th>
-          <th className="py-1 pr-2">Our Range</th>
+          <th className="py-1 pr-2">Provider Price Range</th>
           <th className="py-1 pr-2">Market Avg</th>
-          <th className="py-1 pr-2">Delta</th>
+          <th className="py-1 pr-2">Gap %</th>
           <th className="py-1 pr-2">Verdict</th>
         </tr>
       </thead>
@@ -99,6 +99,9 @@ export function NearbyServices({ items, damageType }: NearbyServicesProps) {
               </p>
               {item.price_badge ? <span className="rounded-full bg-cyan-500/20 px-2 py-0.5 text-[10px] text-cyan-100">{item.price_badge}</span> : null}
             </div>
+            <p className="mb-2 text-xs text-slate-400">
+              {item.address} • {item.is_open_now ? "Open now" : "Closed"}
+            </p>
             <PricingTable pricing={item.pricing} marketComparison={item.market_comparison} damageType={damageType} />
           </div>
         ))}

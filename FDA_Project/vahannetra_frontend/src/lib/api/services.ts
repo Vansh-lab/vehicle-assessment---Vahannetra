@@ -26,6 +26,9 @@ import { delay } from "@/lib/utils";
 import type { HistoryItem } from "@/types/domain";
 
 const USE_BACKEND = env.USE_BACKEND;
+const MIN_VIDEO_POLL_TIMEOUT_MS = 20_000;
+const MAX_VIDEO_POLL_TIMEOUT_MS = 180_000;
+const VIDEO_POLL_TIMEOUT_BUFFER_MS = 15_000;
 
 function extractProcessedFilename(processedImagePath: string): string | null {
   const value = processedImagePath.trim().replace(/\/+$/, "");
@@ -221,19 +224,35 @@ export async function analyzeVideoWithBackend(
   });
 
   let lastResult: VideoResultPayload | null = null;
-  const maxAttempts = 6;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    await delay(800);
+  const estimated = accepted.estimated_seconds ?? 30;
+  const timeoutMs = Math.max(
+    MIN_VIDEO_POLL_TIMEOUT_MS,
+    Math.min(MAX_VIDEO_POLL_TIMEOUT_MS, estimated * 1000 + VIDEO_POLL_TIMEOUT_BUFFER_MS),
+  );
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    await delay(1000);
     const result = await apiRequest<VideoResultPayload>(`/api/v1/results/${accepted.job_id}`);
     lastResult = result;
     if (result.status === "completed") break;
+    if (result.status === "failed") {
+      throw new Error(result.pipeline_error || "Video pipeline failed");
+    }
   }
 
   const mapped = lastResult;
+  if (!mapped || mapped.status !== "completed") {
+    throw new Error("Video analysis is still running. Please retry in a few seconds.");
+  }
   const dsq = Math.round(mapped?.dsq_score ?? 0);
   const severity = mapSeverityFromScore(dsq);
   const primaryType: ResultResponse["findings"][number]["type"] =
     severity === "high" ? "dent" : severity === "medium" ? "scratch" : "paint damage";
+  const processedImageUrl = mapped?.annotated_output
+    ? (mapped.annotated_output.startsWith("http")
+      ? mapped.annotated_output
+      : `${API_BASE_URL}/${mapped.annotated_output.replace(/^\/+/, "")}`)
+    : "/window.svg";
 
   return {
     inspectionId: mapped?.job_id ?? accepted.job_id,
@@ -246,7 +265,7 @@ export async function analyzeVideoWithBackend(
     },
     healthScore: Math.max(0, 100 - dsq),
     triageCategory: dsq >= 34 ? "STRUCTURAL/FUNCTIONAL" : "COSMETIC",
-    processedImageUrl: "/favicon.ico",
+    processedImageUrl,
     findings: [
       {
         id: "DMG-VIDEO-1",

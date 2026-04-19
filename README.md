@@ -68,19 +68,50 @@ python scripts/download_models.py --model all
 ```
 
 ## Environment Variables
-See `FDA_Project/.env.example` for complete table including App, DB, Redis, AWS, Model, Claude, Google Maps, and VAHAN settings.
+| Variable | Purpose | Example |
+|---|---|---|
+| `DEBUG` | Enable debug mode | `false` |
+| `SECRET_KEY` | App signing/encryption secret | `generate-with-openssl-rand-hex-32` |
+| `ALLOWED_ORIGINS` | CORS allow-list | `http://localhost:3000` |
+| `DATABASE_URL` | Postgres connection string | `postgresql+asyncpg://...` |
+| `REDIS_URL` | Redis cache URL | `redis://localhost:6379/0` |
+| `CELERY_BROKER_URL` | Celery broker URL | `redis://localhost:6379/0` |
+| `AWS_ACCESS_KEY_ID` | S3 access key | `your_key` |
+| `AWS_SECRET_ACCESS_KEY` | S3 secret key | `your_secret` |
+| `AWS_REGION` | AWS region | `ap-south-1` |
+| `S3_BUCKET_NAME` | Bucket for artifacts/images | `vahannetra-images` |
+| `YOLO_MODEL_PATH` | YOLO weights path | `ml/weights/vahannetra_yolov9.pt` |
+| `EFFICIENTNET_MODEL_PATH` | EfficientNet weights path | `ml/weights/vahannetra_efficientnet_b4.pt` |
+| `SAM2_MODEL_PATH` | SAM2 weights path | `ml/weights/sam2_hiera_large.pt` |
+| `MODEL_DEVICE` | Inference device | `cpu` |
+| `ANTHROPIC_API_KEY` | Claude API key (optional) | `sk-ant-your-key-here` |
+| `CLAUDE_MODEL` | Claude model id | `claude-sonnet-4-20250514` |
+| `GOOGLE_MAPS_API_KEY` | Google Maps integration (optional) | `your_key_optional` |
+| `VAHAN_API_KEY` | VAHAN integration key (optional) | `your_key_optional` |
+| `VAHAN_BASE_URL` | VAHAN base endpoint (optional) | `https://api.vahan.gov.in/v1` |
 
 ## Running Tests
 ```bash
 cd FDA_Project
+make test-47-matrix
 make test
 ```
+- DSQ contract coverage includes a **47-case matrix** (`test_dsq_v2_47_case_matrix_contract`) inside the broader backend suite.
 
 ## Production Deployment
 - Docker stack: `FDA_Project/docker-compose.yml`
 - Kubernetes manifests: `FDA_Project/k8s/`
 - ECS/ECR deploy workflow: `.github/workflows/deploy-ecs.yml`
+- CI `deploy` job is a handoff gate; run `deploy-ecs.yml` for AWS ECR/ECS rollout + health gates + rollback path.
 - Preflight runbook: `FDA_Project/aws-runtime-proof-runbook.md`
+
+## CI / CodeQL rerun SOP (Copilot push `action_required` with 0 jobs)
+- `ci.yml` and `codeql.yml` support `workflow_dispatch` for manual reruns.
+- If a Copilot-triggered `push` run shows `action_required` with zero jobs:
+  1. Open the workflow in Actions tab.
+  2. Use **Run workflow** on the same branch/commit.
+  3. Verify jobs are created (`CI`: test/lint/build/deploy, `CodeQL`: python/js matrix).
+- Treat `action_required + 0 jobs` on Copilot-triggered push as a platform trigger anomaly when manual rerun executes jobs successfully.
 
 ## Performance Benchmarks (target)
 - Analyze queue API response: `<200ms`

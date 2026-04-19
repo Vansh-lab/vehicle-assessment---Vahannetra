@@ -1,6 +1,7 @@
 name: Deploy ECS/ECR
 
 on:
+  workflow_call:
   push:
     branches: ["main", "master"]
   workflow_dispatch:

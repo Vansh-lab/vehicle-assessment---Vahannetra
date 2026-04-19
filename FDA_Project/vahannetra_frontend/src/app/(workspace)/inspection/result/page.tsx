@@ -22,14 +22,18 @@ import { NearbyServices } from "@/components/advanced/NearbyServices";
 import { BeforeAfterSlider } from "@/components/advanced/BeforeAfterSlider";
 import { useConfirm } from "@/components/providers/confirm-provider";
 import { env } from "@/lib/env";
+import { downloadFallbackInspectionPdf } from "@/lib/reports/fallback-pdf";
 
 export default function ResultPage() {
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
   const [claimMessage, setClaimMessage] = useState("");
+  const [downloadMessage, setDownloadMessage] = useState("");
   const { confirm } = useConfirm();
   const bypassConfirm = env.E2E_BYPASS_CONFIRM;
-  const { latestResult } = useInspectionStore();
+  const { latestResult, beforeImageUrl, afterImageUrl } = useInspectionStore();
   const result = latestResult ?? mockInspectionResult;
+  const resolvedBeforeImage = beforeImageUrl;
+  const resolvedAfterImage = afterImageUrl ?? result.processedImageUrl;
 
   const claimMutation = useMutation({
     mutationFn: () => submitClaim(result.inspectionId),
@@ -45,7 +49,12 @@ export default function ResultPage() {
   const downloadMutation = useMutation({
     mutationFn: () => downloadInspectionReport(result.inspectionId),
     onSuccess: (url) => {
+      setDownloadMessage("");
       window.open(url, "_blank", "noopener,noreferrer");
+    },
+    onError: async () => {
+      await downloadFallbackInspectionPdf(result);
+      setDownloadMessage("Server PDF unavailable. Downloaded fallback report with detailed damage locations.");
     },
   });
 
@@ -135,7 +144,20 @@ export default function ResultPage() {
         <PartGraph items={partGraphData} />
       </div>
 
-      <BeforeAfterSlider beforeUrl="/favicon.ico" afterUrl={result.processedImageUrl} beforeScore={100} afterScore={result.healthScore} />
+      {resolvedBeforeImage && resolvedAfterImage ? (
+        <BeforeAfterSlider
+          beforeUrl={resolvedBeforeImage}
+          afterUrl={resolvedAfterImage}
+          beforeScore={100}
+          afterScore={result.healthScore}
+        />
+      ) : (
+        <Card>
+          <p className="text-sm text-slate-300">
+            Upload both before and after images in New Inspection to enable before-vs-after comparison.
+          </p>
+        </Card>
+      )}
 
       <NearbyServices
         items={garagesQuery.data ?? []}
@@ -191,6 +213,7 @@ export default function ResultPage() {
       </div>
 
       {claimMessage ? <Card><p className="text-xs text-slate-300">{claimMessage}</p></Card> : null}
+      {downloadMessage ? <Card><p className="text-xs text-cyan-100">{downloadMessage}</p></Card> : null}
 
       <Card className="border-cyan-400/20">
         <p className="flex items-center gap-2 text-sm text-cyan-100">

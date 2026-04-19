@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/states/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { downloadFallbackInspectionPdf } from "@/lib/reports/fallback-pdf";
 
 export default function HistoryDetailPage() {
   const params = useParams<{ id: string }>();
@@ -24,6 +25,10 @@ export default function HistoryDetailPage() {
     mutationFn: async () => downloadInspectionReport(id),
     onSuccess: (url) => {
       window.open(url, "_blank", "noopener,noreferrer");
+    },
+    onError: async () => {
+      if (!data) return;
+      await downloadFallbackInspectionPdf(data);
     },
   });
 

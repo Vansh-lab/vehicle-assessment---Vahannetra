@@ -10,20 +10,30 @@ interface AnnotatedImageViewerProps {
 }
 
 export function AnnotatedImageViewer({ imageUrl, findings, heatmapEnabled }: AnnotatedImageViewerProps) {
+  const referenceBounds = useMemo(() => {
+    // Assumes detection boxes follow [x1, y1, x2, y2] pixel coordinates.
+    const maxX = Math.max(...findings.map((item) => item.box[2]), 1);
+    const maxY = Math.max(...findings.map((item) => item.box[3]), 1);
+    return { width: maxX, height: maxY };
+  }, [findings]);
+
   const overlays = useMemo(
     () =>
       findings.map((item) => {
         const [x1, y1, x2, y2] = item.box;
+        const width = Math.max(0, x2 - x1);
+        const height = Math.max(0, y2 - y1);
         return {
           id: item.id,
-          left: `${(x1 / 420) * 100}%`,
-          top: `${(y1 / 280) * 100}%`,
-          width: `${((x2 - x1) / 420) * 100}%`,
-          height: `${((y2 - y1) / 280) * 100}%`,
+          label: `${item.type} ${(item.confidence * 100).toFixed(0)}%`,
+          left: `${(x1 / referenceBounds.width) * 100}%`,
+          top: `${(y1 / referenceBounds.height) * 100}%`,
+          width: `${(width / referenceBounds.width) * 100}%`,
+          height: `${(height / referenceBounds.height) * 100}%`,
           color: item.severity === "high" ? "#ff5a7a" : item.severity === "medium" ? "#ffb648" : "#35d48d",
         };
       }),
-    [findings],
+    [findings, referenceBounds.height, referenceBounds.width],
   );
 
   return (
@@ -45,7 +55,14 @@ export function AnnotatedImageViewer({ imageUrl, findings, heatmapEnabled }: Ann
             boxShadow: `0 0 12px ${overlay.color}`,
           }}
           aria-label={`damage-box-${overlay.id}`}
-        />
+        >
+          <span
+            className="absolute -top-6 left-0 rounded bg-slate-950/80 px-1.5 py-0.5 text-[10px] font-medium capitalize text-slate-100"
+            style={{ border: `1px solid ${overlay.color}` }}
+          >
+            {overlay.label}
+          </span>
+        </div>
       ))}
     </div>
   );

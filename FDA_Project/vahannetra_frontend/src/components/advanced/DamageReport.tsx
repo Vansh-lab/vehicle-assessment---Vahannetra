@@ -17,6 +17,9 @@ export function DamageReport({ findings }: DamageReportProps) {
               Severity: {finding.severity} • Confidence: {Math.round(finding.confidence * 100)}%
             </p>
             <p>
+              Region: ({Math.round((finding.box[0] + finding.box[2]) / 2)}, {Math.round((finding.box[1] + finding.box[3]) / 2)}) • Box: {Math.round(Math.max(0, finding.box[2] - finding.box[0]))}×{Math.round(Math.max(0, finding.box[3] - finding.box[1]))} px
+            </p>
+            <p>
               Estimate: ₹{finding.estimateMin.toLocaleString()} - ₹{finding.estimateMax.toLocaleString()}
             </p>
           </li>
