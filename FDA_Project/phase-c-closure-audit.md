@@ -22,7 +22,7 @@
 
 - Deploy workflow present with ECS/ECR deploy + health gates + rollback + perf artifact capture.
 - CI dependency install hardened with retry/backoff to reduce transient pip SSL/network failures during large wheel downloads.
-- CodeQL workflow is executing with jobs on current branch runs; no persistent zero-job blocker observed in latest reruns.
+- CodeQL workflow can execute successfully on rerun attempts, but Copilot-triggered push runs may still conclude `action_required` with zero jobs.
 
 ---
 
@@ -42,11 +42,12 @@ Runbook:
 
 - `FDA_Project/aws-runtime-proof-runbook.md`
 
-### 2) Final CI/CodeQL verification on release head (execution confirmed; final sign-off pending)
+### 2) Final CI/CodeQL verification on release head (rerun path works; push trigger still flaky)
 
 Observed:
 
-- CodeQL jobs execute successfully in latest branch reruns.
+- CI and CodeQL jobs execute successfully on manual/rerun attempts.
+- Copilot-triggered push runs may still conclude `action_required` with zero jobs.
 - A recent CI failure was transient during pip dependency download (`ssl.SSLError`) in test job install step.
 
 What changed:
@@ -55,7 +56,7 @@ What changed:
 
 What remains:
 
-- Run CI and CodeQL on the final release head and archive successful run links in closure evidence.
+- Run CI and CodeQL from workflow rerun/manual dispatch on the final release head and archive successful run links in closure evidence.
 
 ---
 
