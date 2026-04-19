@@ -6,11 +6,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from vahannetra.backend.app.core.settings import settings
-from vahannetra.backend.app.routers import analyze_router, health_router, system_router
+from vahannetra.backend.app.database import init_models
+from vahannetra.backend.app.routers import (
+    analyze_router,
+    health_router,
+    results_router,
+    system_router,
+)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    await init_models()
     yield
 
 
@@ -32,3 +39,4 @@ async def root() -> dict[str, str]:
 app.include_router(health_router)
 app.include_router(system_router)
 app.include_router(analyze_router)
+app.include_router(results_router)

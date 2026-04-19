@@ -16,7 +16,9 @@ async def capabilities(
         backend_foundation=True,
         auth=True,
         async_db=True,
-        routers=["health", "system", "analyze"],
+        routers=["health", "system", "analyze", "results"],
+        persistence=True,
+        queue=True,
     )
 
 

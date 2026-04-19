@@ -1,4 +1,4 @@
-.PHONY: dev test seed migrate build clean shell logs smoke aws-preflight phase1-bootstrap phase1-verify phase2-verify
+.PHONY: dev test seed migrate build clean shell logs smoke aws-preflight phase1-bootstrap phase1-verify phase2-verify phase3-verify
 
 dev:
 	docker compose -f docker-compose.dev.yml up --build
@@ -38,3 +38,6 @@ phase1-verify:
 
 phase2-verify:
 	cd .. && PYTHONPATH=. python -m vahannetra.scripts.verify_phase2_backend
+
+phase3-verify:
+	cd .. && PYTHONPATH=. python -m vahannetra.scripts.verify_phase3_backend
