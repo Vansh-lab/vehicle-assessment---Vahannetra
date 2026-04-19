@@ -18,7 +18,7 @@ from app.db_models import InspectionJob, User
 from app.services.detector import DamageDetector
 from app.services.dsq_v2 import compute_dsq_v2
 from app.services.storage import ArtifactStorageService
-from app.services.video_processing import extract_best_frames
+from app.tasks.pipeline import PIPELINE_STEPS, queue_video_pipeline
 from app.utils.network import ensure_public_http_url
 
 router = APIRouter(prefix="/api/v1", tags=["analyze"])
@@ -107,6 +107,23 @@ def _write_bytes(path: Path, payload: bytes) -> None:
 def _read_bytes(path: Path) -> bytes:
     with open(path, "rb") as input_file:
         return input_file.read()
+
+
+def _pipeline_breakdown(
+    status: str,
+    current_step: str,
+    completed_steps: list[str] | None = None,
+    error: str = "",
+) -> dict:
+    return {
+        "pipeline": {
+            "status": status,
+            "current_step": current_step,
+            "total_steps": len(PIPELINE_STEPS),
+            "completed_steps": completed_steps or [],
+            "error": error,
+        }
+    }
 
 
 def _box_iou(a: list[float], b: list[float]) -> float:
@@ -297,63 +314,40 @@ async def v1_analyze_video(
     file_path = UPLOAD_DIR / local_video_name
     await asyncio.to_thread(_write_bytes, file_path, payload)
 
-    frames_dir = UPLOAD_DIR / f"{job_id}_frames"
-    extraction = await asyncio.to_thread(
-        extract_best_frames, file_path, frames_dir, 6, 100.0
-    )
-    estimated_seconds = max(3, min(120, extraction.duration_seconds + 4))
-
-    frame_keys: list[str] = []
-    detections: list[dict] = []
-    annotated_output = ""
-    for index, frame in enumerate(extraction.extracted_frames, start=1):
-        frame_key = f"jobs/{job_id}/frame_{index}.jpg"
-        frame_keys.append(frame_key)
-        try:
-            frame_bytes = await asyncio.to_thread(_read_bytes, frame.frame_path)
-            await storage_service.upload_bytes(frame_key, frame_bytes, "image/jpeg")
-        except OSError:
-            pass
-
-        frame_detections, frame_annotated_path = await asyncio.to_thread(
-            detector.analyze_vehicle, str(frame.frame_path)
-        )
-        detections.extend(frame_detections)
-        if not annotated_output and frame_annotated_path:
-            annotated_output = frame_annotated_path
-
-    fused = _fuse_detections_with_nms(detections)
-
-    # Fixed key contract from spec
     video_key = f"jobs/{job_id}/input_video.mp4"
     await storage_service.upload_bytes(
         video_key, payload, file.content_type or "video/webm"
     )
 
-    if annotated_output:
-        try:
-            annotated_bytes = await asyncio.to_thread(
-                _read_bytes, Path(annotated_output)
-            )
-            await storage_service.upload_bytes(
-                f"jobs/{job_id}/annotated.jpg", annotated_bytes, "image/jpeg"
-            )
-        except OSError:
-            pass
-
-    job = await create_job_from_findings_async(
-        db,
-        current_user.organization_id,
-        fused,
+    job = InspectionJob(
+        id=job_id,
+        organization_id=current_user.organization_id,
+        status="queued",
         input_type="video",
-        annotated_key=f"jobs/{job_id}/annotated.jpg" if annotated_output else "",
-        image_keys=frame_keys,
-        video_key=video_key,
-        status="completed",
+        s3_image_keys="[]",
+        s3_video_key=video_key,
+        s3_annotated_key="",
+        dsq_breakdown=json.dumps(
+            _pipeline_breakdown("queued", PIPELINE_STEPS[0], []), sort_keys=True
+        ),
+        recommendation="Queued for 14-step async pipeline execution.",
+        insurance_claim_steps="Upload RC, policy, and inspection images. Submit claim and await surveyor review.",
     )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    queued, task_id = await asyncio.to_thread(queue_video_pipeline, job.id, str(file_path))
+    estimated_seconds = max(5, min(180, int(len(payload) / (400 * 1024)) + 15))
+
     return V1AnalyzeAccepted(
         job_id=job.id,
         status="queued",
-        message="Video analysis accepted",
+        message=(
+            "Video analysis accepted and queued"
+            if queued
+            else "Video analysis accepted (fallback worker execution mode)"
+        )
+        + (f" [{task_id}]" if task_id else ""),
         estimated_seconds=estimated_seconds,
     )

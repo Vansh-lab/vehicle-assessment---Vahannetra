@@ -168,6 +168,9 @@ async def v1_results(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    breakdown = json.loads(job.dsq_breakdown or "{}")
+    pipeline = breakdown.get("pipeline") if isinstance(breakdown, dict) else {}
+
     return {
         "job_id": job.id,
         "status": job.status,
@@ -179,7 +182,11 @@ async def v1_results(
         "auto_approve": job.auto_approve,
         "repair_cost_min_inr": job.repair_cost_min_inr,
         "repair_cost_max_inr": job.repair_cost_max_inr,
-        "dsq_breakdown": json.loads(job.dsq_breakdown or "{}"),
+        "dsq_breakdown": breakdown,
+        "current_step": pipeline.get("current_step"),
+        "total_steps": pipeline.get("total_steps"),
+        "completed_steps": pipeline.get("completed_steps", []),
+        "pipeline_error": pipeline.get("error", ""),
         "annotated_output": job.s3_annotated_key,
         "blockchain_hash": job.blockchain_hash,
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 
 import type { DamageFinding } from "@/types/domain";
@@ -15,7 +15,9 @@ type SpeechRecognitionCtor = new () => {
   maxAlternatives: number;
   onresult: ((event: { results: { 0: { 0: { transcript: string } } } }) => void) | null;
   onerror: (() => void) | null;
+  onend: (() => void) | null;
   start: () => void;
+  stop: () => void;
 };
 
 interface GeoVoiceReportPanelProps {
@@ -31,8 +33,12 @@ export function GeoVoiceReportPanel({ findings, triageCategory, healthScore }: G
   const [voiceNotes, setVoiceNotes] = useState("");
   const [voiceError, setVoiceError] = useState("");
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState<string>("");
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const recognitionRef = useRef<{
+    stop: () => void;
+  } | null>(null);
 
   const summaryText = useMemo(() => {
     const high = findings.filter((item) => item.severity === "high").length;
@@ -151,6 +157,11 @@ export function GeoVoiceReportPanel({ findings, triageCategory, healthScore }: G
     setIsSpeaking(false);
   };
 
+  const stopVoiceCapture = () => {
+    recognitionRef.current?.stop();
+    setIsListening(false);
+  };
+
   const captureVoiceNotes = () => {
     const SpeechRecognition = (
       window as Window & {
@@ -173,11 +184,18 @@ export function GeoVoiceReportPanel({ findings, triageCategory, healthScore }: G
     recognition.lang = "en-IN";
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
+    recognitionRef.current = recognition;
+    setIsListening(true);
     recognition.onresult = (event) => {
       const transcript = event.results?.[0]?.[0]?.transcript ?? "";
       setVoiceNotes(transcript);
+      setIsListening(false);
     };
-    recognition.onerror = () => setVoiceError("Unable to capture voice notes.");
+    recognition.onerror = () => {
+      setVoiceError("Unable to capture voice notes.");
+      setIsListening(false);
+    };
+    recognition.onend = () => setIsListening(false);
     recognition.start();
   };
 
@@ -195,11 +213,15 @@ export function GeoVoiceReportPanel({ findings, triageCategory, healthScore }: G
         <Button type="button" variant="secondary" onClick={speakSummary}>
           Speak summary
         </Button>
-        <Button type="button" variant="secondary" onClick={stopSpeaking}>
+        <Button type="button" variant="secondary" onClick={stopSpeaking} disabled={!isSpeaking}>
           Stop voice
         </Button>
-        <Button type="button" variant="secondary" onClick={captureVoiceNotes}>
-          Capture voice notes
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={isListening ? stopVoiceCapture : captureVoiceNotes}
+        >
+          {isListening ? "Stop capture" : "Capture voice notes"}
         </Button>
       </div>
 
@@ -217,12 +239,18 @@ export function GeoVoiceReportPanel({ findings, triageCategory, healthScore }: G
         </select>
       </div>
 
-      {isSpeaking ? (
+      {isSpeaking || isListening ? (
         <div className="flex items-end gap-1">
           {[1, 2, 3, 4, 5].map((bar) => (
-            <span key={bar} className="h-4 w-1 animate-pulse rounded bg-cyan-300" style={{ animationDelay: `${bar * 80}ms` }} />
+            <span
+              key={bar}
+              className="w-1 animate-pulse rounded bg-cyan-300"
+              style={{ animationDelay: `${bar * 70}ms`, height: `${10 + ((bar % 3) * 5)}px` }}
+            />
           ))}
-          <span className="text-xs text-cyan-200">Speaking...</span>
+          <span className="text-xs text-cyan-200">
+            {isListening ? "Listening..." : "Speaking..."}
+          </span>
         </div>
       ) : null}
 

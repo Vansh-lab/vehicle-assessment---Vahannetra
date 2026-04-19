@@ -93,6 +93,7 @@ python scripts/download_models.py --model all
 ## Running Tests
 ```bash
 cd FDA_Project
+make test-47-matrix
 make test
 ```
 - DSQ contract coverage includes a **47-case matrix** (`test_dsq_v2_47_case_matrix_contract`) inside the broader backend suite.
@@ -103,6 +104,14 @@ make test
 - ECS/ECR deploy workflow: `.github/workflows/deploy-ecs.yml`
 - CI `deploy` job is a handoff gate; run `deploy-ecs.yml` for AWS ECR/ECS rollout + health gates + rollback path.
 - Preflight runbook: `FDA_Project/aws-runtime-proof-runbook.md`
+
+## CI / CodeQL rerun SOP (Copilot push `action_required` with 0 jobs)
+- `ci.yml` and `codeql.yml` support `workflow_dispatch` for manual reruns.
+- If a Copilot-triggered `push` run shows `action_required` with zero jobs:
+  1. Open the workflow in Actions tab.
+  2. Use **Run workflow** on the same branch/commit.
+  3. Verify jobs are created (`CI`: test/lint/build/deploy, `CodeQL`: python/js matrix).
+- Treat `action_required + 0 jobs` on Copilot-triggered push as a platform trigger anomaly when manual rerun executes jobs successfully.
 
 ## Performance Benchmarks (target)
 - Analyze queue API response: `<200ms`

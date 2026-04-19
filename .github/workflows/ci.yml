@@ -5,6 +5,7 @@ on:
     branches: ["main", "master", "copilot/**"]
   pull_request:
     branches: ["main", "master"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -46,6 +47,11 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: python -m pip install -r requirements.txt pytest-asyncio pytest-cov
+      - name: Enforce DSQ 47-case matrix contract
+        run: |
+          CASE_COUNT=$(PYTHONPATH=. pytest tests/test_dsq_v2.py --collect-only -q | grep -c "test_dsq_v2_47_case_matrix_contract\\[case")
+          echo "Collected DSQ matrix cases: ${CASE_COUNT}"
+          test "${CASE_COUNT}" -eq 47
       - name: Run pytest + coverage
         env:
           VAHANNETRA_DATABASE_URL: postgresql://vahannetra:password@localhost:5432/vahannetra_db

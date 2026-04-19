@@ -1,10 +1,22 @@
-.PHONY: dev test seed migrate build clean shell logs smoke aws-preflight phase1-bootstrap phase1-verify phase2-verify phase3-verify phase4-verify phase5-verify phase6-verify phase7-verify
+.PHONY: dev test test-47-matrix frontend-lint frontend-build frontend-e2e seed migrate build clean shell logs smoke aws-preflight phase1-bootstrap phase1-verify phase2-verify phase3-verify phase4-verify phase5-verify phase6-verify phase7-verify
 
 dev:
 	docker compose -f docker-compose.dev.yml up --build
 
 test:
 	cd vehicle_assessment_backend && PYTHONPATH=. pytest tests/ -v --asyncio-mode=auto --cov=app --cov=ml
+
+test-47-matrix:
+	cd vehicle_assessment_backend && CASE_COUNT=$$(PYTHONPATH=. pytest tests/test_dsq_v2.py --collect-only -q | grep -c "test_dsq_v2_47_case_matrix_contract\\[case") && echo "Collected DSQ matrix cases: $$CASE_COUNT" && test "$$CASE_COUNT" -eq 47
+
+frontend-lint:
+	cd vahannetra_frontend && rm -rf .next && npm run lint
+
+frontend-build:
+	cd vahannetra_frontend && npm run build
+
+frontend-e2e:
+	cd vahannetra_frontend && npm run test:e2e
 
 seed:
 	docker compose exec api python scripts/seed_garages.py

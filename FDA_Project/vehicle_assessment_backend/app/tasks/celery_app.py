@@ -15,7 +15,7 @@ celery_app = Celery(
     "vahannetra_worker",
     broker=CELERY_BROKER_URL,
     backend=CELERY_RESULT_BACKEND,
-    include=["app.tasks.webhooks"],
+    include=["app.tasks.webhooks", "app.tasks.pipeline"],
 )
 
 celery_app.conf.update(
@@ -25,6 +25,7 @@ celery_app.conf.update(
         "app.tasks.webhooks.record_webhook_dead_letter": {
             "queue": settings.celery_dlq_queue
         },
+        "app.tasks.pipeline.process_video_pipeline": {"queue": settings.celery_queue},
     },
     task_serializer="json",
     result_serializer="json",

@@ -221,15 +221,23 @@ export async function analyzeVideoWithBackend(
   });
 
   let lastResult: VideoResultPayload | null = null;
-  const maxAttempts = 6;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    await delay(800);
+  const estimated = accepted.estimated_seconds ?? 30;
+  const timeoutMs = Math.max(20_000, Math.min(180_000, estimated * 1000 + 15_000));
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    await delay(1000);
     const result = await apiRequest<VideoResultPayload>(`/api/v1/results/${accepted.job_id}`);
     lastResult = result;
     if (result.status === "completed") break;
+    if (result.status === "failed") {
+      throw new Error(result.pipeline_error || "Video pipeline failed");
+    }
   }
 
   const mapped = lastResult;
+  if (!mapped || mapped.status !== "completed") {
+    throw new Error("Video analysis is still running. Please retry in a few seconds.");
+  }
   const dsq = Math.round(mapped?.dsq_score ?? 0);
   const severity = mapSeverityFromScore(dsq);
   const primaryType: ResultResponse["findings"][number]["type"] =
