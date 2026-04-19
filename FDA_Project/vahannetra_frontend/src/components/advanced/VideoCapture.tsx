@@ -89,7 +89,7 @@ export function VideoCapture({ onVideoReady, onCapture }: VideoCaptureProps) {
     chunksRef.current = [];
     const mimeType = preferredRecordingMimeType();
     if (!mimeType) {
-      setCaptureError("Recording is not supported in this browser. Please upload MP4, MOV, or WEBM video.");
+      setCaptureError("Recording is not supported in this browser. Please upload mp4, mov, or webm video.");
       return;
     }
     const recorder = new MediaRecorder(streamRef.current, { mimeType });
@@ -167,7 +167,7 @@ export function VideoCapture({ onVideoReady, onCapture }: VideoCaptureProps) {
 
       {permission === "denied" ? (
         <div className="space-y-2 text-xs text-amber-200">
-          <p>Camera access denied. You can still upload an MP4 video manually.</p>
+          <p>Camera access denied. You can still upload an mp4, mov, or webm video manually.</p>
           <input
             type="file"
             accept="video/mp4,video/quicktime,video/webm"

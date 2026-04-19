@@ -242,8 +242,10 @@ export async function analyzeVideoWithBackend(
   const severity = mapSeverityFromScore(dsq);
   const primaryType: ResultResponse["findings"][number]["type"] =
     severity === "high" ? "dent" : severity === "medium" ? "scratch" : "paint damage";
-  const processedImageUrl = mapped?.annotated_output && /^https?:\/\//.test(mapped.annotated_output)
-    ? mapped.annotated_output
+  const processedImageUrl = mapped?.annotated_output
+    ? (mapped.annotated_output.startsWith("http")
+      ? mapped.annotated_output
+      : `${API_BASE_URL}/${mapped.annotated_output.replace(/^\/+/, "")}`)
     : "/window.svg";
 
   return {

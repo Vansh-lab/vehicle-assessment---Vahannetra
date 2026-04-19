@@ -301,7 +301,13 @@ async def run_video_pipeline_async(job_id: str, local_video_path: str) -> None:
             logger.exception(
                 "Video pipeline failed for job_id=%s at step=%s", job_id, current_step
             )
-            await _mark_failed(session, job, current_step, completed_steps, str(exc))
+            await _mark_failed(
+                session,
+                job,
+                current_step,
+                completed_steps,
+                f"{type(exc).__name__}: {exc}",
+            )
 
 
 @celery_app.task(name="app.tasks.pipeline.process_video_pipeline")

@@ -340,7 +340,17 @@ async def v1_analyze_video(
     queued, task_id = await asyncio.to_thread(
         queue_video_pipeline, job.id, str(file_path)
     )
-    estimated_seconds = max(5, min(180, int(len(payload) / (400 * 1024)) + 15))
+    estimated_kb_per_second = 400
+    bytes_per_kb = 1024
+    fixed_overhead_seconds = 15
+    estimated_seconds = max(
+        5,
+        min(
+            180,
+            int(len(payload) / (estimated_kb_per_second * bytes_per_kb))
+            + fixed_overhead_seconds,
+        ),
+    )
 
     return V1AnalyzeAccepted(
         job_id=job.id,

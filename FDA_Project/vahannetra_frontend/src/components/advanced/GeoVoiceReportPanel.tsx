@@ -12,7 +12,7 @@ type Position = { lat: number; lng: number } | null;
 const WAVE_BAR_DELAY_MS = 70;
 const WAVE_BAR_BASE_HEIGHT_PX = 10;
 const WAVE_BAR_HEIGHT_STEP_PX = 5;
-const WAVE_BAR_VARIANTS = 3;
+const WAVE_BAR_VARIANT_COUNT = 3;
 
 type SpeechRecognitionCtor = new () => {
   lang: string;
@@ -252,7 +252,7 @@ export function GeoVoiceReportPanel({ findings, triageCategory, healthScore }: G
               className="w-1 animate-pulse rounded bg-cyan-300"
               style={{
                 animationDelay: `${bar * WAVE_BAR_DELAY_MS}ms`,
-                height: `${WAVE_BAR_BASE_HEIGHT_PX + ((bar % WAVE_BAR_VARIANTS) * WAVE_BAR_HEIGHT_STEP_PX)}px`,
+                height: `${WAVE_BAR_BASE_HEIGHT_PX + ((bar % WAVE_BAR_VARIANT_COUNT) * WAVE_BAR_HEIGHT_STEP_PX)}px`,
               }}
             />
           ))}
