@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vahannetra-api
+  namespace: vahannetra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vahannetra-api
+  template:
+    metadata:
+      labels:
+        app: vahannetra-api
+    spec:
+      containers:
+        - name: api
+          image: vahannetra-backend:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: REDIS_URL
+              value: redis://vahannetra-redis:6379/0
+            - name: CELERY_BROKER_URL
+              value: redis://vahannetra-redis:6379/0
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vahannetra-api
+  namespace: vahannetra
+spec:
+  selector:
+    app: vahannetra-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
