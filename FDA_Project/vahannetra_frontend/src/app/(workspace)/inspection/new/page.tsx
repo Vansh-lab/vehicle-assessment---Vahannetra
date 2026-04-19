@@ -120,7 +120,6 @@ export default function NewInspectionPage() {
 
       {step === 3 ? (
         <div className="space-y-4">
-          <PhotoUpload file={selectedFile} onFileChange={setFile} />
           <Card className="space-y-3">
             <p className="text-sm font-semibold text-slate-100">Before / After image pair (recommended)</p>
             <div className="grid gap-3 md:grid-cols-2">
@@ -133,6 +132,7 @@ export default function NewInspectionPage() {
                   onChange={(event) => {
                     const file = event.target.files?.[0] ?? null;
                     setBeforeAfterFiles({ beforeFile: file });
+                    if (file) setFile(file);
                   }}
                 />
                 {beforeImageUrl ? <img src={beforeImageUrl} alt="Before upload preview" className="h-32 w-full rounded-lg border border-white/15 object-cover" /> : null}
@@ -164,6 +164,7 @@ export default function NewInspectionPage() {
             }}
             onCapture={(videoFile) => setFile(videoFile)}
           />
+          <PhotoUpload file={selectedFile} onFileChange={setFile} />
           <div className="sticky bottom-16 space-y-2 md:bottom-4">
             <Button className="w-full" disabled={!selectedFile} onClick={submitInspection}>Analyze Damage</Button>
             {!selectedFile ? <p className="text-center text-xs text-slate-400">Upload at least one image to continue.</p> : null}
