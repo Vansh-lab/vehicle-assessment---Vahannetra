@@ -26,6 +26,9 @@ import { delay } from "@/lib/utils";
 import type { HistoryItem } from "@/types/domain";
 
 const USE_BACKEND = env.USE_BACKEND;
+const MIN_VIDEO_POLL_TIMEOUT_MS = 20_000;
+const MAX_VIDEO_POLL_TIMEOUT_MS = 180_000;
+const VIDEO_POLL_TIMEOUT_BUFFER_MS = 15_000;
 
 function extractProcessedFilename(processedImagePath: string): string | null {
   const value = processedImagePath.trim().replace(/\/+$/, "");
@@ -222,7 +225,10 @@ export async function analyzeVideoWithBackend(
 
   let lastResult: VideoResultPayload | null = null;
   const estimated = accepted.estimated_seconds ?? 30;
-  const timeoutMs = Math.max(20_000, Math.min(180_000, estimated * 1000 + 15_000));
+  const timeoutMs = Math.max(
+    MIN_VIDEO_POLL_TIMEOUT_MS,
+    Math.min(MAX_VIDEO_POLL_TIMEOUT_MS, estimated * 1000 + VIDEO_POLL_TIMEOUT_BUFFER_MS),
+  );
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     await delay(1000);

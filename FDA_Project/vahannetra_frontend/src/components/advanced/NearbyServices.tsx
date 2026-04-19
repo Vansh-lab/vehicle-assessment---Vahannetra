@@ -44,7 +44,7 @@ function PricingTable({
       <thead>
         <tr className="text-left text-slate-400">
           <th className="py-1 pr-2">Service</th>
-          <th className="py-1 pr-2">Provider Range</th>
+          <th className="py-1 pr-2">Provider Price Range</th>
           <th className="py-1 pr-2">Market Avg</th>
           <th className="py-1 pr-2">Gap %</th>
           <th className="py-1 pr-2">Verdict</th>

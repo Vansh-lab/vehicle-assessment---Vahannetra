@@ -11,6 +11,7 @@ interface AnnotatedImageViewerProps {
 
 export function AnnotatedImageViewer({ imageUrl, findings, heatmapEnabled }: AnnotatedImageViewerProps) {
   const referenceBounds = useMemo(() => {
+    // Assumes detection boxes follow [x1, y1, x2, y2] pixel coordinates.
     const maxX = Math.max(...findings.map((item) => item.box[2]), 1);
     const maxY = Math.max(...findings.map((item) => item.box[3]), 1);
     return { width: maxX, height: maxY };
