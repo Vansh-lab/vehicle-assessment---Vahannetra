@@ -337,7 +337,9 @@ async def v1_analyze_video(
     await db.commit()
     await db.refresh(job)
 
-    queued, task_id = await asyncio.to_thread(queue_video_pipeline, job.id, str(file_path))
+    queued, task_id = await asyncio.to_thread(
+        queue_video_pipeline, job.id, str(file_path)
+    )
     estimated_seconds = max(5, min(180, int(len(payload) / (400 * 1024)) + 15))
 
     return V1AnalyzeAccepted(

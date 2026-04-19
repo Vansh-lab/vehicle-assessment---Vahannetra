@@ -128,7 +128,11 @@ async def _read_bytes(path: Path) -> bytes:
 
 
 async def _update_step(
-    session, job: InspectionJob, status: str, current_step: str, completed_steps: list[str]
+    session,
+    job: InspectionJob,
+    status: str,
+    current_step: str,
+    completed_steps: list[str],
 ) -> None:
     job.status = status
     job.dsq_breakdown = json.dumps(
@@ -137,7 +141,13 @@ async def _update_step(
     await session.commit()
 
 
-async def _mark_failed(session, job: InspectionJob, current_step: str, completed_steps: list[str], message: str) -> None:
+async def _mark_failed(
+    session,
+    job: InspectionJob,
+    current_step: str,
+    completed_steps: list[str],
+    message: str,
+) -> None:
     job.status = "failed"
     job.dsq_breakdown = json.dumps(
         _pipeline_payload("failed", current_step, completed_steps, error=message),
@@ -210,17 +220,23 @@ async def run_video_pipeline_async(job_id: str, local_video_path: str) -> None:
                 "generate_report_payload",
             ]:
                 current_step = step_name
-                await _update_step(session, job, "running", current_step, completed_steps)
+                await _update_step(
+                    session, job, "running", current_step, completed_steps
+                )
                 completed_steps.append(current_step)
 
             current_step = "persist_artifacts"
             await _update_step(session, job, "running", current_step, completed_steps)
             video_bytes = await _read_bytes(video_path)
-            await storage_service.upload_bytes(job.s3_video_key, video_bytes, "video/mp4")
+            await storage_service.upload_bytes(
+                job.s3_video_key, video_bytes, "video/mp4"
+            )
             if annotated_output:
                 annotated_bytes = await _read_bytes(Path(annotated_output))
                 annotated_key = f"jobs/{job.id}/annotated.jpg"
-                await storage_service.upload_bytes(annotated_key, annotated_bytes, "image/jpeg")
+                await storage_service.upload_bytes(
+                    annotated_key, annotated_bytes, "image/jpeg"
+                )
                 job.s3_annotated_key = annotated_key
             job.s3_image_keys = json.dumps(frame_keys)
             job.dsq_score = round(dsq_result.score, 2)
@@ -237,7 +253,10 @@ async def run_video_pipeline_async(job_id: str, local_video_path: str) -> None:
             )
             job.overall_severity = dsq_result.overall_severity
             job.confidence_overall = round(
-                max([float(item.get("confidence", 0.0)) for item in fused], default=0.0), 4
+                max(
+                    [float(item.get("confidence", 0.0)) for item in fused], default=0.0
+                ),
+                4,
             )
             job.fraud_risk_score = dsq_result.fraud_risk_score
             job.fraud_flags = json.dumps([])
@@ -245,9 +264,7 @@ async def run_video_pipeline_async(job_id: str, local_video_path: str) -> None:
             job.repair_cost_min_inr = dsq_result.repair_cost_min_inr
             job.repair_cost_max_inr = dsq_result.repair_cost_max_inr
             job.recommendation = "Proceed with repair estimate and insurer review."
-            job.insurance_claim_steps = (
-                "Upload RC, policy, and inspection images. Submit claim and await surveyor review."
-            )
+            job.insurance_claim_steps = "Upload RC, policy, and inspection images. Submit claim and await surveyor review."
             hash_value = hashlib.sha256(
                 json.dumps(
                     {
