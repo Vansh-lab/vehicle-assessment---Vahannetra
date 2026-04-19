@@ -101,7 +101,7 @@ make test
 - Docker stack: `FDA_Project/docker-compose.yml`
 - Kubernetes manifests: `FDA_Project/k8s/`
 - ECS/ECR deploy workflow: `.github/workflows/deploy-ecs.yml`
-- CI `deploy` job executes the same ECS/ECR workflow path via reusable workflow call.
+- CI `deploy` job is a handoff gate; run `deploy-ecs.yml` for AWS ECR/ECS rollout + health gates + rollback path.
 - Preflight runbook: `FDA_Project/aws-runtime-proof-runbook.md`
 
 ## Performance Benchmarks (target)
