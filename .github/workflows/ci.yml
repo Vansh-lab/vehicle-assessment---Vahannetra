@@ -49,11 +49,11 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          for attempt in 1 2 3; do
-            if python -m pip install --retries 10 --timeout 60 -r requirements.txt pytest-asyncio pytest-cov; then
+          for attempt in 1 2; do
+            if python -m pip install --retries 5 --timeout 60 -r requirements.txt pytest-asyncio pytest-cov; then
               break
             fi
-            if [ "$attempt" -eq 3 ]; then
+            if [ "$attempt" -eq 2 ]; then
               echo "Dependency install failed after ${attempt} attempts."
               exit 1
             fi
@@ -87,11 +87,11 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          for attempt in 1 2 3; do
-            if python -m pip install --retries 10 --timeout 60 -r requirements.txt black ruff; then
+          for attempt in 1 2; do
+            if python -m pip install --retries 5 --timeout 60 -r requirements.txt black ruff; then
               break
             fi
-            if [ "$attempt" -eq 3 ]; then
+            if [ "$attempt" -eq 2 ]; then
               echo "Lint dependency install failed after ${attempt} attempts."
               exit 1
             fi
