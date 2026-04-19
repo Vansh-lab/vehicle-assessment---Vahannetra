@@ -28,8 +28,10 @@ export default function ResultPage() {
   const [claimMessage, setClaimMessage] = useState("");
   const { confirm } = useConfirm();
   const bypassConfirm = env.E2E_BYPASS_CONFIRM;
-  const { latestResult } = useInspectionStore();
+  const { latestResult, beforeImageUrl, afterImageUrl } = useInspectionStore();
   const result = latestResult ?? mockInspectionResult;
+  const resolvedBeforeImage = beforeImageUrl;
+  const resolvedAfterImage = afterImageUrl ?? result.processedImageUrl;
 
   const claimMutation = useMutation({
     mutationFn: () => submitClaim(result.inspectionId),
@@ -135,7 +137,20 @@ export default function ResultPage() {
         <PartGraph items={partGraphData} />
       </div>
 
-      <BeforeAfterSlider beforeUrl="/favicon.ico" afterUrl={result.processedImageUrl} beforeScore={100} afterScore={result.healthScore} />
+      {resolvedBeforeImage && resolvedAfterImage ? (
+        <BeforeAfterSlider
+          beforeUrl={resolvedBeforeImage}
+          afterUrl={resolvedAfterImage}
+          beforeScore={100}
+          afterScore={result.healthScore}
+        />
+      ) : (
+        <Card>
+          <p className="text-sm text-slate-300">
+            Upload both before and after images in New Inspection to enable before-vs-after comparison.
+          </p>
+        </Card>
+      )}
 
       <NearbyServices
         items={garagesQuery.data ?? []}

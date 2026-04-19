@@ -246,7 +246,7 @@ export async function analyzeVideoWithBackend(
     },
     healthScore: Math.max(0, 100 - dsq),
     triageCategory: dsq >= 34 ? "STRUCTURAL/FUNCTIONAL" : "COSMETIC",
-    processedImageUrl: "/favicon.ico",
+    processedImageUrl: "/window.svg",
     findings: [
       {
         id: "DMG-VIDEO-1",

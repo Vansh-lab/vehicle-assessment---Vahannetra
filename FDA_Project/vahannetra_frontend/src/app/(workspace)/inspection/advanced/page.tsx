@@ -9,9 +9,11 @@ import { PartGraph } from "@/components/advanced/PartGraph";
 import { NearbyServices } from "@/components/advanced/NearbyServices";
 import { BeforeAfterSlider } from "@/components/advanced/BeforeAfterSlider";
 import { GeoVoiceReportPanel } from "@/components/advanced/GeoVoiceReportPanel";
+import { useInspectionStore } from "@/store/inspection-store";
 
 export default function AdvancedInspectionPage() {
   const result = mockInspectionResult;
+  const { beforeImageUrl, afterImageUrl } = useInspectionStore();
   const grouped = result.findings.reduce<Record<string, number>>((acc, item) => {
     acc[item.type] = (acc[item.type] ?? 0) + 1;
     return acc;
@@ -24,7 +26,20 @@ export default function AdvancedInspectionPage() {
         <PartGraph items={Object.entries(grouped).map(([part, impact]) => ({ part, impact }))} />
       </div>
       <div className="space-y-3">
-        <BeforeAfterSlider beforeUrl={result.processedImageUrl} afterUrl={result.processedImageUrl} beforeScore={100} afterScore={result.healthScore} />
+        {beforeImageUrl && (afterImageUrl ?? result.processedImageUrl) ? (
+          <BeforeAfterSlider
+            beforeUrl={beforeImageUrl}
+            afterUrl={afterImageUrl ?? result.processedImageUrl}
+            beforeScore={100}
+            afterScore={result.healthScore}
+          />
+        ) : (
+          <Card>
+            <p className="text-sm text-slate-300">
+              Before/After slider appears here when both images are uploaded in New Inspection.
+            </p>
+          </Card>
+        )}
         <CarHeatmap findings={result.findings} />
         <NearbyServices
           items={[

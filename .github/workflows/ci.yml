@@ -84,9 +84,6 @@ jobs:
 
   deploy:
     name: deploy
-    runs-on: ubuntu-latest
     needs: [build]
-    steps:
-      - name: ECS deploy handoff
-        run: |
-          echo "Build succeeded. Use deploy-ecs workflow for AWS ECR/ECS rollout + smoke + rollback gates."
+    uses: ./.github/workflows/deploy-ecs.yml
+    secrets: inherit

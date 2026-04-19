@@ -11,6 +11,22 @@ interface VideoCaptureProps {
 
 type PermissionState = "idle" | "requesting" | "granted" | "denied";
 
+function preferredRecordingMimeType() {
+  if (MediaRecorder.isTypeSupported("video/mp4;codecs=h264")) return "video/mp4;codecs=h264";
+  if (MediaRecorder.isTypeSupported("video/mp4")) return "video/mp4";
+  if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) return "video/webm;codecs=vp9";
+  if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) return "video/webm;codecs=vp8";
+  if (MediaRecorder.isTypeSupported("video/webm")) return "video/webm";
+  return "";
+}
+
+function extensionFromMimeType(type: string) {
+  if (type.includes("mp4")) return "mp4";
+  if (type.includes("quicktime")) return "mov";
+  if (type.includes("webm")) return "webm";
+  return "bin";
+}
+
 export function VideoCapture({ onVideoReady, onCapture }: VideoCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -71,15 +87,9 @@ export function VideoCapture({ onVideoReady, onCapture }: VideoCaptureProps) {
   const startRecording = useCallback(() => {
     if (!(streamRef.current instanceof MediaStream)) return;
     chunksRef.current = [];
-    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-      ? "video/webm;codecs=vp9"
-      : MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
-        ? "video/webm;codecs=vp8"
-        : MediaRecorder.isTypeSupported("video/webm")
-          ? "video/webm"
-          : "";
+    const mimeType = preferredRecordingMimeType();
     if (!mimeType) {
-      setCaptureError("Recording is not supported in this browser. Please upload a video file.");
+      setCaptureError("Recording is not supported in this browser. Please upload an MP4 video file.");
       return;
     }
     const recorder = new MediaRecorder(streamRef.current, { mimeType });
@@ -119,8 +129,10 @@ export function VideoCapture({ onVideoReady, onCapture }: VideoCaptureProps) {
     if (!videoBlob) return;
     onVideoReady?.(videoBlob);
     if (onCapture) {
-      const file = new File([videoBlob], `capture-${Date.now()}.webm`, {
-        type: videoBlob.type || "video/webm",
+      const mimeType = videoBlob.type || "video/mp4";
+      const extension = extensionFromMimeType(mimeType);
+      const file = new File([videoBlob], `capture-${Date.now()}.${extension}`, {
+        type: mimeType,
       });
       onCapture(file);
     }
@@ -155,10 +167,10 @@ export function VideoCapture({ onVideoReady, onCapture }: VideoCaptureProps) {
 
       {permission === "denied" ? (
         <div className="space-y-2 text-xs text-amber-200">
-          <p>Camera access denied. You can still upload a video manually.</p>
+          <p>Camera access denied. You can still upload an MP4 video manually.</p>
           <input
             type="file"
-            accept="video/mp4,video/webm,video/quicktime"
+            accept="video/mp4,video/quicktime,video/webm"
             onChange={(event) => {
               const picked = event.target.files?.[0];
               if (!picked) return;
@@ -168,6 +180,20 @@ export function VideoCapture({ onVideoReady, onCapture }: VideoCaptureProps) {
           />
         </div>
       ) : null}
+
+      <div className="space-y-1 text-xs text-slate-300">
+        <p>Fallback upload (recommended: MP4)</p>
+        <input
+          type="file"
+          accept="video/mp4,video/quicktime,video/webm"
+          onChange={(event) => {
+            const picked = event.target.files?.[0];
+            if (!picked) return;
+            onVideoReady?.(picked);
+            onCapture?.(picked);
+          }}
+        />
+      </div>
 
       {captureError ? <p className="text-xs text-rose-200">{captureError}</p> : null}
 

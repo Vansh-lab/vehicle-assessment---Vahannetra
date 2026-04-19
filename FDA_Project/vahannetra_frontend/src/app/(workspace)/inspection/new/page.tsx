@@ -27,12 +27,27 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
+function extensionFromMimeType(type: string) {
+  if (type.includes("mp4")) return "mp4";
+  if (type.includes("quicktime")) return "mov";
+  if (type.includes("webm")) return "webm";
+  return "bin";
+}
+
 export default function NewInspectionPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [vehicleType, setVehicleType] = useState<VehicleType>("4W");
   const [selectedAngles, setSelectedAngles] = useState<CaptureAngle[]>(["Front"]);
-  const { selectedFile, setFile, setVehicleInfo, setAngles } = useInspectionStore();
+  const {
+    selectedFile,
+    beforeImageUrl,
+    afterImageUrl,
+    setFile,
+    setVehicleInfo,
+    setAngles,
+    setBeforeAfterFiles,
+  } = useInspectionStore();
   const { register, handleSubmit, formState: { errors }, getValues } = useForm<FormValues>({ resolver: zodResolver(schema) });
 
   const angleCoverageWarning = useMemo(() => (
@@ -106,7 +121,49 @@ export default function NewInspectionPage() {
       {step === 3 ? (
         <div className="space-y-4">
           <PhotoUpload file={selectedFile} onFileChange={setFile} />
-          <VideoCapture onVideoReady={(blob) => setFile(new File([blob], `capture-${Date.now()}.webm`, { type: blob.type || "video/webm" }))} onCapture={(videoFile) => setFile(videoFile)} />
+          <Card className="space-y-3">
+            <p className="text-sm font-semibold text-slate-100">Before / After image pair (recommended)</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="before-image">Before image</Label>
+                <Input
+                  id="before-image"
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    setBeforeAfterFiles({ beforeFile: file });
+                  }}
+                />
+                {beforeImageUrl ? <img src={beforeImageUrl} alt="Before upload preview" className="h-32 w-full rounded-lg border border-white/15 object-cover" /> : null}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="after-image">After image</Label>
+                <Input
+                  id="after-image"
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    setBeforeAfterFiles({ afterFile: file });
+                    if (file) setFile(file);
+                  }}
+                />
+                {afterImageUrl ? <img src={afterImageUrl} alt="After upload preview" className="h-32 w-full rounded-lg border border-white/15 object-cover" /> : null}
+              </div>
+            </div>
+            <p className="text-xs text-slate-400">
+              Uploading both images enables a real before-vs-after slider on the result screen.
+            </p>
+          </Card>
+          <VideoCapture
+            onVideoReady={(blob) => {
+              const extension = extensionFromMimeType(blob.type || "video/webm");
+              const mimeType = blob.type || "video/webm";
+              setFile(new File([blob], `capture-${Date.now()}.${extension}`, { type: mimeType }));
+            }}
+            onCapture={(videoFile) => setFile(videoFile)}
+          />
           <div className="sticky bottom-16 space-y-2 md:bottom-4">
             <Button className="w-full" disabled={!selectedFile} onClick={submitInspection}>Analyze Damage</Button>
             {!selectedFile ? <p className="text-center text-xs text-slate-400">Upload at least one image to continue.</p> : null}
