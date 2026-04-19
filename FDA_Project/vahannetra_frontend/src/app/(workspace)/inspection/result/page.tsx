@@ -22,10 +22,12 @@ import { NearbyServices } from "@/components/advanced/NearbyServices";
 import { BeforeAfterSlider } from "@/components/advanced/BeforeAfterSlider";
 import { useConfirm } from "@/components/providers/confirm-provider";
 import { env } from "@/lib/env";
+import { downloadFallbackInspectionPdf } from "@/lib/reports/fallback-pdf";
 
 export default function ResultPage() {
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
   const [claimMessage, setClaimMessage] = useState("");
+  const [downloadMessage, setDownloadMessage] = useState("");
   const { confirm } = useConfirm();
   const bypassConfirm = env.E2E_BYPASS_CONFIRM;
   const { latestResult, beforeImageUrl, afterImageUrl } = useInspectionStore();
@@ -47,7 +49,12 @@ export default function ResultPage() {
   const downloadMutation = useMutation({
     mutationFn: () => downloadInspectionReport(result.inspectionId),
     onSuccess: (url) => {
+      setDownloadMessage("");
       window.open(url, "_blank", "noopener,noreferrer");
+    },
+    onError: async () => {
+      await downloadFallbackInspectionPdf(result);
+      setDownloadMessage("Server PDF unavailable. Downloaded fallback report with detailed damage locations.");
     },
   });
 
@@ -206,6 +213,7 @@ export default function ResultPage() {
       </div>
 
       {claimMessage ? <Card><p className="text-xs text-slate-300">{claimMessage}</p></Card> : null}
+      {downloadMessage ? <Card><p className="text-xs text-cyan-100">{downloadMessage}</p></Card> : null}
 
       <Card className="border-cyan-400/20">
         <p className="flex items-center gap-2 text-sm text-cyan-100">
